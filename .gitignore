@@ -1,0 +1,31 @@
+# Gradle / Android build output
+.gradle/
+.kotlin/
+build/
+/local.properties
+/captures/
+*.apk
+*.aab
+*.ap_
+*.dex
+*.class
+
+# IDE
+.idea/
+*.iml
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs and local artifacts
+*.log
+screenshots/
+.claude/worktrees/
+.claude/settings.local.json
+.claude/scheduled_tasks.lock
+CLAUDE.local.md

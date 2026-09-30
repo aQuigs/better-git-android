@@ -1,0 +1,47 @@
+# Shared workflow: sync-common keeps every repo's copy identical to the original in the tooling checkout; edit the original only.
+name: android-ci
+on: [push]
+permissions:
+  contents: read
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    # Maven Central answers bursts with 429, and after 3 tries Gradle disables the repository for the rest of the build.
+    env:
+      GRADLE_OPTS: -Dorg.gradle.internal.repository.max.tentatives=8 -Dorg.gradle.internal.repository.initial.backoff=2000
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Setup JDK
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v6
+        with:
+          # The default provider is proprietary and free only for public repos, and copies of this workflow can be private.
+          cache-provider: basic
+
+      - name: Build, lint and run the unit tests
+        run: ./gradlew assembleDebug assembleDebugAndroidTest lintDebug testDebugUnitTest
+
+      - name: Check the build left the tree clean
+        # A file the build rewrites or creates inside the tree belongs in the commit; otherwise every local build shows a stray diff.
+        run: |
+          if [ -n "$(git status --porcelain)" ]; then
+            git status --short
+            echo "::error::The build changed or created files that are not committed"
+            exit 1
+          fi
+
+      - name: Upload the reports
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: reports
+          path: '**/build/reports/'

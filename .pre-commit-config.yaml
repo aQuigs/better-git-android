@@ -1,0 +1,39 @@
+exclude: '^\.claude/'
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: check-case-conflict
+      - id: check-json
+      - id: check-merge-conflict
+      - id: check-shebang-scripts-are-executable
+      - id: check-symlinks
+      - id: check-vcs-permalinks
+      - id: check-xml
+      - id: check-yaml
+
+      - id: destroyed-symlinks
+      - id: detect-aws-credentials
+        args: ['--allow-missing-credentials']
+      - id: detect-private-key
+      - id: pretty-format-json
+        args: ['--no-sort-keys', '--indent=4', '--autofix']
+
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+      - id: mixed-line-ending
+      - id: check-added-large-files
+  - repo: local
+    hooks:
+      - id: check-markdown
+        name: check-markdown
+        entry: markdownlint -c ./.markdownlintrc --ignore .claude
+        language: system
+        files: \.(md|mdown|markdown)$
+      - id: gradle-checks
+        name: Run Gradle lint and unit tests
+        entry: ./gradlew lintDebug testDebugUnitTest -q
+        language: system
+        pass_filenames: false
+        files: \.(kt|kts|gradle|toml|xml|properties)$
+        stages: [pre-commit]
