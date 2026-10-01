@@ -2,6 +2,8 @@ import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 plugins {
     alias(libs.plugins.kotlin.jvm)
+    // The SafeSync contract runs on the JVM and, from the app's androidTest, against the bundled git
+    `java-test-fixtures`
 }
 
 // Compiles against the Java 17 API, not the JDK Gradle runs on: with a JDK 21 build, a call like List.removeFirst would
@@ -20,6 +22,8 @@ kotlin {
 }
 
 dependencies {
+    testFixturesApi(libs.junit)
+
     testImplementation(libs.junit)
 }
 

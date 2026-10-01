@@ -4,8 +4,11 @@ import java.io.File
 
 /** Runs git commands. Sync logic depends only on this, so it can be tested against desktop git on the JVM. */
 interface Git {
-    /** Runs `git [args]` in [dir], with [environment] added for this call only, such as a token's config. */
-    fun run(dir: File, args: List<String>, environment: Map<String, String> = emptyMap()): GitResult
+    /**
+     * Runs `git [args]` in [dir], with [environment] added for this call only, such as a token's config, and [input] on
+     * its stdin, such as a list of paths too long for the command line.
+     */
+    fun run(dir: File, args: List<String>, environment: Map<String, String> = emptyMap(), input: String = ""): GitResult
 }
 
 fun Git.run(dir: File, vararg args: String) = run(dir, args.toList())

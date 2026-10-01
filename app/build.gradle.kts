@@ -87,6 +87,7 @@ dependencies {
 
     testImplementation(libs.junit)
 
+    androidTestImplementation(testFixtures(project(":sync")))
     androidTestImplementation(platform(libs.androidx.compose.bom))
     androidTestImplementation(libs.androidx.test.ext.junit)
     // ui-test-junit4 only brings Espresso 3.5.0 at runtime, which cannot inject input on API 34 and later
