@@ -8,12 +8,13 @@ Git Sync (ViscousPot/GitSync, Flutter + libgit2) loses work: its pull merges and
 
 ## Decided so far
 
-- **Engine: the real git CLI**, cross-compiled for arm64-v8a against bionic, shipped in `jniLibs` as `lib*.so` (`useLegacyPackaging = true`) and exec'd from `applicationInfo.nativeLibraryDir`. Helpers such as `git-remote-https` are symlinks from app storage into `nativeLibraryDir`, found through `GIT_EXEC_PATH`. This gives desktop git's exact rebase (merge-ort, rename detection, fork-point) at native speed. VSCodroid ships the same setup on Play at targetSdk 36. Rejected alternatives:
+- **Engine: the real git CLI.** `scripts/fetch-git.sh` takes Termux's latest arm64 git and its libraries; they are bionic builds with 16 KB page alignment. They ship in `jniLibs` as `lib*.so` (`useLegacyPackaging`), because Android only executes an app's files from `nativeLibraryDir`. `BundledGit` symlinks the names git needs into that directory and overrides every Termux prefix path through the environment. This gives desktop git's exact rebase (merge-ort, rename detection) at native speed. VSCodroid ships the same setup on Play. Rejected alternatives:
   - JGit: 6.x and 7.x crash on ART, and 5.13 is slow with an old merge.
   - libgit2: no autostash, no merge-ort, and its rebase detaches HEAD.
   - gitoxide: no rebase.
+- **No shell:** the build's shell is Termux's `sh`, which is not on the device. Hooks, aliases and local-path remotes fail; HTTPS remotes need none of them.
 - **Engine boundary:** sync logic talks to a `Git` interface in plain Kotlin, and the CLI runner is one implementation of it. The logic is then unit tested on the JVM against real desktop git in temp repos, plus fakes.
-- **Storage:** repos live in shared storage (e.g. an Obsidian vault in `Documents/`) under the All-files access permission (`MANAGE_EXTERNAL_STORAGE`), declared as core functionality on Play. SAF cannot back git (no paths, lstat or locking). To keep object and index I/O off the slow FUSE layer, the repo's git dir sits in app-private storage and points at the shared worktree (`core.worktree`). Tuning: `core.untrackedCache`, `feature.manyFiles`.
+- **Storage:** repos live in shared storage (e.g. an Obsidian vault in `Documents/`) under the All-files access permission (`MANAGE_EXTERNAL_STORAGE`), declared as core functionality on Play. SAF cannot back git (no paths, lstat or locking). To keep object and index I/O off the slow FUSE layer, the repo's git dir sits in app-private storage and points at the shared worktree, with `core.untrackedCache` on. On the emulator with the notes repo (about 2,800 files), this split layout brings `status` from 36 ms to 9 ms, and committing 20 edits from 0.4–0.65 s to 0.14 s, compared with the whole repo in shared storage.
 - **Auth:** ease of use first. GitHub sign-in uses the OAuth device flow, which needs no client secret or backend. The token lives in the Android Keystore and reaches git through `GIT_CONFIG_COUNT`/`http.extraHeader`, never argv or a config file. HTTPS only to start; SSH (a bundled ssh client) comes later if needed.
 - **Sync is manual:** a button, nothing in the background yet. A sync takes seconds, so it runs as expedited WorkManager work, not a foreground service.
 
@@ -31,10 +32,9 @@ Kill git cleanly when a sync is cancelled, and recover a stale `index.lock` only
 
 ## Open questions and risks
 
-- **Binaries:** extract Termux's packages (their hardcoded `/data/data/com.termux` paths need `GIT_EXEC_PATH`, `OPENSSL_CONF` and a CA bundle file built from the system and user stores) or build from source with the NDK in CI. Whichever supplies them owns their security updates, and git (GPLv2) needs a written source offer.
-- **16 KB pages:** since Nov 2025 Play requires 16 KB page alignment for targetSdk 35 and above, and that covers bundled executables. Check it on every binary.
+- **Binaries:** each build takes Termux's latest packages, so security fixes arrive with Termux. git is GPLv2: the app needs a source offer naming the versions listed in `assets/git/packages`.
 - **Play review:** the All-files access declaration could be rejected.
-- **FUSE:** `status` on a big vault may be slow. Benchmark against `~/repos/notes` (about 2,800 files).
+- **FUSE:** the first `add` of a whole vault is slow (4 s for the notes repo, split layout). Measure on a real phone too.
 
 ## Commands
 
@@ -47,7 +47,21 @@ scripts/emulator-lock.sh ./gradlew connectedDebugAndroidTest  # Compose UI tests
 scripts/emulator-lock.sh scripts/run.sh  # install the debug build and open it (VARIANT=Release for the minified build)
 scripts/screenshot.sh [name]         # adb screencap → screenshots/<name>.png (gitignored)
 scripts/pr-media.sh <file> <caption>... # upload shots as GitHub attachments, print the PR body's media table
+./gradlew :app:fetchGit --rerun      # take Termux's newest git build; a build otherwise keeps the one it fetched first
 ```
+
+## Layout
+
+```text
+sync/src/main/kotlin/com/sqftware/safegit/
+└── git/                 # the Git interface and CliGit, which runs any git executable
+app/src/main/kotlin/com/sqftware/safegit/
+├── MainActivity.kt
+└── git/BundledGit.kt    # sets up the git binaries shipped as native libraries
+scripts/fetch-git.sh     # downloads Termux's git and lays it out as jniLibs and assets
+```
+
+`sync` answers to `testDebugUnitTest` too, so the shared CI and pre-commit commands run its JVM tests.
 
 ## How we work
 
@@ -55,5 +69,6 @@ scripts/pr-media.sh <file> <caption>... # upload shots as GitHub attachments, pr
 
 ## Don't
 
+- Give `sync` an Android dependency.
 - Run any git command that can discard work: `reset --hard`, `checkout --force`, `clean`, `rebase --abort` or `stash drop` in the user's worktree, or a force push.
 - Add libraries (DI, navigation, Hilt) before a feature needs them.
