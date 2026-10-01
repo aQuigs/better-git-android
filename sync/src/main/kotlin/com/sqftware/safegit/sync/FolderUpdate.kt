@@ -7,7 +7,6 @@ import java.nio.file.Files
 import java.nio.file.LinkOption.NOFOLLOW_LINKS
 import java.nio.file.Path
 import java.nio.file.StandardCopyOption.ATOMIC_MOVE
-import java.nio.file.StandardCopyOption.COPY_ATTRIBUTES
 import java.nio.file.StandardCopyOption.REPLACE_EXISTING
 import java.nio.file.attribute.BasicFileAttributes
 
@@ -81,7 +80,7 @@ internal class FolderUpdate(private val git: RepoGit) {
             .map { (entry, path) -> entry.removePrefix(":").split(" ").let { Change(path, it[0], it[1], it[3]) } }
         private val changes = entries.filter { it.old || it.new }.associateBy { it.path }
         private val byCase = changes.keys.groupBy { it.lowercase() }
-        private val listings = HashMap<File, Set<String>>()
+        private val listings = HashMap<File, MutableSet<String>>()
 
         fun run(resuming: Boolean): Result {
             if (git.output("config", "--bool", "core.ignorecase") == "true") {
@@ -94,15 +93,17 @@ internal class FolderUpdate(private val git: RepoGit) {
             stage(from, Side.FROM)
             stage(to, Side.TO)
 
+            // One look at every file before anything is written; place() looks at each again right before its write
+            val states = changes.keys.associateWith { state(it) }
             // Files a killed run already moved go back too if this one fails
-            val moved = if (resuming) changes.keys.filter { state(it) == Side.TO }.toMutableList() else mutableListOf()
-            val blocked = changes.keys.filter { state(it) == null }
+            val moved = if (resuming) states.filterValues { it == Side.TO }.keys.toMutableList() else mutableListOf()
+            val blocked = states.filterValues { it == null }.keys.toList()
             if (blocked.isNotEmpty()) {
                 return undo(moved) ?: Result.Blocked(blocked)
             }
 
             for (path in inOrder(changes.keys, Side.TO)) {
-                if (state(path) == Side.TO) continue
+                if (states[path] == Side.TO) continue
                 moved += path
                 try {
                     if (!place(path, Side.TO)) return undo(moved) ?: Result.Blocked(listOf(path))
@@ -205,7 +206,9 @@ internal class FolderUpdate(private val git: RepoGit) {
             }
         }
 
-        private fun hasExactName(file: File) = file.name in listings.getOrPut(file.parentFile) { file.parentFile.list().orEmpty().toSet() }
+        private fun hasExactName(file: File) = file.name in listing(file.parentFile)
+
+        private fun listing(folder: File) = listings.getOrPut(folder) { folder.list().orEmpty().toMutableSet() }
 
         /**
          * Puts [toward]'s version of [path] in the folder, or deletes it when that side has none, checking right before
@@ -215,16 +218,18 @@ internal class FolderUpdate(private val git: RepoGit) {
             val target = workTree.resolve(path).toPath()
             val source = version(toward, path)
             try {
-                source?.let { Files.copy(it, temp.toPath(), REPLACE_EXISTING, COPY_ATTRIBUTES, NOFOLLOW_LINKS) }
+                source?.let { Files.copy(it, temp.toPath(), REPLACE_EXISTING, NOFOLLOW_LINKS) }
                 when (state(path, renames = false)) {
                     toward -> return true
                     null -> return false
                     else -> {}
                 }
 
+                val folder = target.parent.toFile()
                 if (source == null) {
                     Files.delete(target)
-                    removeEmptyFolders(target.parent.toFile())
+                    listing(folder) -= target.fileName.toString()
+                    removeEmptyFolders(folder)
                 } else {
                     // Only folders should be left there by now, since the files in them went first
                     if (Files.isDirectory(target, NOFOLLOW_LINKS)) {
@@ -232,18 +237,19 @@ internal class FolderUpdate(private val git: RepoGit) {
                     }
                     Files.createDirectories(target.parent)
                     Files.move(temp.toPath(), target, REPLACE_EXISTING, ATOMIC_MOVE)
+                    listing(folder) += target.fileName.toString()
                 }
-                listings.remove(target.parent.toFile())
                 return true
             } finally {
-                temp.delete()
+                if (source != null) temp.delete()
             }
         }
 
         private fun removeEmptyFolders(start: File) {
             var folder = start
             while (folder != workTree && folder.list()?.isEmpty() == true && folder.delete()) {
-                listings.remove(folder.parentFile)
+                listings.remove(folder)
+                listing(folder.parentFile) -= folder.name
                 folder = folder.parentFile
             }
         }
