@@ -68,9 +68,21 @@ cp "$PREFIX/bin/git" "$LIBS/libgit.so"
 cp "$PREFIX/libexec/git-core/git-remote-http" "$LIBS/libgit-remote-http.so"
 cat > "$ASSETS/links" <<EOF
 exec/git libgit.so
+exec/git-upload-pack libgit.so
+exec/git-receive-pack libgit.so
 exec/git-remote-http libgit-remote-http.so
 exec/git-remote-https libgit-remote-http.so
 EOF
+
+# git runs some commands through its compiled-in shell, Termux's sh. Pointing it at Android's own, padded with slashes
+# to the same length, leaves every other string in the binary where it was.
+for EXE in "$LIBS/libgit.so" "$LIBS/libgit-remote-http.so"; do
+  perl -0777 -pi -e 's{/data/data/com\.termux/files/usr(/bin/sh\0)}{"/" x 25 . "system$1"}ge' "$EXE"
+  if ! grep -q '//system/bin/sh' "$EXE"; then
+    echo "Found no shell path to patch in $EXE" >&2
+    exit 1
+  fi
+done
 
 # A versioned soname such as libssl.so.3 ships as libssl.so and is linked back to its soname
 for LIB in "$PREFIX"/lib/lib*.so "$PREFIX"/lib/lib*.so.[0-9] "$PREFIX"/lib/lib*.so.[0-9][0-9]; do
