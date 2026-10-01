@@ -25,8 +25,17 @@ mkdir -p "$LIBS" "$ASSETS"
 
 curl -fsSL "$REPO/dists/stable/main/binary-aarch64/Packages" -o "$WORK/Packages"
 
+# Prints "<package> <version>" for every entry in the index
+ENTRIES='{ p = v = ""; n = split($0, l, "\n"); for (i = 1; i <= n; i++) { if (l[i] ~ /^Package: /) p = substr(l[i], 10); if (l[i] ~ /^Version: /) v = substr(l[i], 10) } }'
+
+# A package's newest entry: the index can list one twice while Termux replaces it, and apt takes the newest too
+stanza() {
+  VERSION=$(awk -v RS= -v pkg="$1" "$ENTRIES"' p == pkg { print v }' "$WORK/Packages" | sort -V | tail -1)
+  awk -v RS= -v pkg="$1" -v ver="$VERSION" "$ENTRIES"' p == pkg && v == ver { print; exit }' "$WORK/Packages"
+}
+
 field() {
-  awk -v pkg="$1" -v key="$2:" '$1 == "Package:" { hit = ($2 == pkg) } hit && $1 == key { $1 = ""; sub(/^ /, ""); print; exit }' "$WORK/Packages"
+  stanza "$1" | sed -n "s/^$2: //p"
 }
 
 SEEN=" "
@@ -34,10 +43,8 @@ visit() {
   case "$SEEN$SKIP_PACKAGES" in *" $1 "*) return ;; esac
   SEEN="$SEEN$1 "
 
-  # The index can list a package twice while Termux replaces it; refusing then beats pairing an old library with a new git
-  COUNT=$(grep -c "^Package: $1\$" "$WORK/Packages" || true)
-  if [ "$COUNT" != 1 ]; then
-    echo "Termux lists package $1 $COUNT times, expected once" >&2
+  if [ -z "$(field "$1" Version)" ]; then
+    echo "Termux has no package $1" >&2
     exit 1
   fi
 
