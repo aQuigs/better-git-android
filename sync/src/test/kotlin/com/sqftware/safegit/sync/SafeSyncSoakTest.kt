@@ -56,8 +56,8 @@ class SafeSyncSoakTest {
         private val written = mutableSetOf<String>()
         private val discarded = mutableSetOf<String>()
 
-        /** Every line a phone's user wrote, and those someone removed on purpose. */
-        private val phoneLines = mutableSetOf<String>()
+        /** Every line a phone's user wrote, with its file's name ignoring case, and the lines someone removed on purpose. */
+        private val phoneLines = mutableMapOf<String, String>()
         private val removed = mutableSetOf<String>()
 
         init {
@@ -124,15 +124,18 @@ class SafeSyncSoakTest {
                     git.ok(laptop, "rm", "-q", path)
                 }
                 3 -> run(laptop, "mv", path, path.uppercase().takeIf { it != path } ?: path.lowercase())
-                4 -> NAMES.filter { it !in files && files.none { f -> f.startsWith("$it/") || it.startsWith("$f/") } }
+                4 -> NAMES.filter { name ->
+                    // The laptop's disk may be case-insensitive too, where a name in another case would open an existing file
+                    files.map { it.lowercase() }.none { it == name || it.startsWith("$name/") || name.startsWith("$it/") }
+                }
                     .randomOrNull(random)?.let { laptop.resolve(it).apply { parentFile.mkdirs() }.writeText(lines("laptop")) }
                 else -> {
                     // A force push drops the remote's newest commit, which phones may have pushed
                     if (git.ok(laptop, "rev-list", "--count", "HEAD").toInt() > 1) {
-                        val before = linesIn(laptop, "HEAD")
+                        val before = linesIn(laptop, "HEAD").values.flatten()
                         git.ok(laptop, "reset", "-q", "--hard", "HEAD~1")
                         git.ok(laptop, "push", "-q", "--force", "origin", "HEAD:main")
-                        removed += before - linesIn(laptop, "HEAD")
+                        removed += before - linesIn(laptop, "HEAD").values.flatten().toSet()
                         steps += "laptop force-pushes HEAD~1"
                     }
                     return
@@ -218,7 +221,8 @@ class SafeSyncSoakTest {
         }
 
         private fun checkTheRemoteHasEveryLine() {
-            val missing = phoneLines - removed - linesIn(remote, "main")
+            val files = linesIn(remote, "main")
+            val missing = phoneLines.filter { (line, path) -> line !in removed && line !in files[path].orEmpty() }
             assertTrue("Lines the remote lost: $missing", missing.isEmpty())
         }
 
@@ -226,10 +230,11 @@ class SafeSyncSoakTest {
         private fun objects(gitDir: File) =
             git.ok(root, "--git-dir=${gitDir.path}", "rev-list", "--all", "--objects").lines().map { it.substringBefore(" ") }
 
-        private fun linesIn(repo: File, commit: String): Set<String> {
-            val blobs = git.ok(repo, "ls-tree", "-r", "-z", commit).paths().map { it.substringBefore("\t").split(" ")[2] }
-            return blobs.flatMapTo(mutableSetOf()) { git.ok(repo, "cat-file", "blob", it).lines() }
-        }
+        /** The lines of each file in [commit], by its name ignoring case. */
+        private fun linesIn(repo: File, commit: String): Map<String, Set<String>> =
+            git.ok(repo, "ls-tree", "-r", "-z", commit).paths().associate { entry ->
+                entry.substringAfter("\t").lowercase() to git.ok(repo, "cat-file", "blob", entry.substringBefore("\t").split(" ")[2]).lines().toSet()
+            }
 
         private fun run(dir: File, vararg args: String) = git.run(dir, args.toList(), LAPTOP.environment)
 
@@ -261,24 +266,37 @@ class SafeSyncSoakTest {
                 replacing(path, text.lines())
                 folder.resolve(path).apply { parentFile.mkdirs() }.writeText(text)
                 written += blobId(text)
-                phoneLines += text.lines().filter { it.startsWith("phone ") }
+                for (line in text.lines().filter { it.startsWith("phone ") }) phoneLines.putIfAbsent(line, path.lowercase())
                 steps += "phone $name writes $path"
             }
 
-            fun delete(path: String) {
-                replacing(path, emptyList())
+            fun delete(path: String, keeping: Collection<String> = emptyList()) {
+                replacing(path, keeping)
                 folder.resolve(path).delete()
                 steps += "phone $name deletes $path"
             }
 
             /** The user removes the lines they replace, and a version no sync committed yet is theirs to lose. */
-            private fun replacing(path: String, newLines: List<String>) {
+            private fun replacing(path: String, newLines: Collection<String>) {
                 val file = folder.resolve(path)
                 if (!file.isFile) return
                 val old = file.readText()
                 removed += old.lines() - newLines.toSet()
                 val id = blobId(old)
                 if (id in written && id !in objects(repo.gitDir)) discarded += id
+            }
+
+            /** Names changed from [from] to [to], ignoring case, where a rename by case alone is no change. */
+            private fun changed(from: String, to: String): List<String> {
+                val changes = repoGit.diff(from, to)
+                fun key(change: Change) = when {
+                    change.newMode == Change.ABSENT -> change.path.lowercase() to change.oldBlob
+                    change.oldMode == Change.ABSENT -> change.path.lowercase() to change.newBlob
+                    else -> null
+                }
+                // Such a rename is one name gone and one added in another case, holding the same content
+                val renamed = changes.mapNotNull(::key).groupingBy { it }.eachCount().filterValues { it == 2 }.keys
+                return changes.filter { key(it) !in renamed }.map { it.path.lowercase() }
             }
 
             /**
@@ -288,9 +306,8 @@ class SafeSyncSoakTest {
             fun checkBothSidesChanged(reported: List<String>) {
                 val upstream = "refs/remotes/origin/main"
                 val base = repoGit.output("merge-base", "--fork-point", upstream, "HEAD") ?: repoGit.output("merge-base", "HEAD", upstream) ?: return
-                fun changed(to: String) = gitOk("diff", "--name-only", "--no-renames", "-z", base, to).paths().map { it.lowercase() }
-                val ours = changed("HEAD")
-                val theirs = changed(upstream)
+                val ours = changed(base, "HEAD")
+                val theirs = changed(base, upstream)
                 for (path in reported.map { it.replace(Regex("~[^/]*$"), "").lowercase() }) {
                     fun touches(changes: List<String>) = changes.any { it == path || it.startsWith("$path/") || path.startsWith("$it/") }
                     assertTrue("Conflict on $path, which only one side changed", touches(ours) && touches(theirs))
@@ -306,8 +323,9 @@ class SafeSyncSoakTest {
                 val upstream = gitOk("rev-parse", "refs/remotes/origin/main")
                 val names = reported.map { it.replace(Regex("~[^/]*$"), "").lowercase() }.toSet()
                 fun matches(path: String) = path.lowercase() in names || names.any { path.lowercase().startsWith("$it/") }
+                val theirs = linesIn(repo.gitDir, upstream).filterKeys(::matches).values.flatten().toSet()
 
-                for (file in files().filter(::matches)) delete(file)
+                for (file in files().filter(::matches)) delete(file, keeping = theirs)
                 folder.walk().filter { it.isDirectory && it != folder && matches(it.relativeTo(folder).invariantSeparatorsPath) }
                     .sortedByDescending { it.path.length }.forEach { it.delete() }
                 for (path in gitOk("ls-tree", "-r", "-z", "--name-only", upstream).paths().filter(::matches)) {
