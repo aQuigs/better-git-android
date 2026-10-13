@@ -115,20 +115,30 @@ jobs:
             return "$status"
           }
 
-          edit=$(play -X POST "$api/edits" | jq -er .id)
-          version=$(play -H 'Content-Type: application/octet-stream' --data-binary @"$aab" \
-            "$upload_api/edits/$edit/bundles?uploadType=media" | jq -er .versionCode)
-          track=$(jq -n --arg version "$version" '{releases: [{versionCodes: [$version], status: "completed"}]}')
-          play -X PUT --json "$track" "$api/edits/$edit/tracks/internal" > /dev/null
+          # A 5xx can leave the edit it happened in unusable, so a retry needs a fresh edit, not just a retried call.
+          # set -e is off inside a function called from a condition, so each step that must stop the attempt checks its own exit.
+          publish() {
+            edit=$(play -X POST "$api/edits" | jq -er .id) || return 1
+            version=$(play -H 'Content-Type: application/octet-stream' --data-binary @"$aab" \
+              "$upload_api/edits/$edit/bundles?uploadType=media" | jq -er .versionCode) || return 1
+            track=$(jq -n --arg version "$version" '{releases: [{versionCodes: [$version], status: "completed"}]}')
+            play -X PUT --json "$track" "$api/edits/$edit/tracks/internal" > /dev/null || return 1
 
-          # Testers who joined through the closed test link install from alpha, so it must not lag internal. Only a live
-          # alpha release is followed: publishing to an app with no closed test would start one, and replacing a draft or
-          # halted release would override what was chosen in Play Console.
-          # Run outside the if, where a failed call would read as false instead of failing the step
-          tracks=$(play "$api/edits/$edit/tracks")
-          closed_test=$(jq -r 'any(.tracks[] | select(.track == "alpha") | .releases[]?; .status == "completed" or .status == "inProgress")' <<< "$tracks")
-          if [ "$closed_test" = true ]; then
-            play -X PUT --json "$track" "$api/edits/$edit/tracks/alpha" > /dev/null
-          fi
+            # Testers who joined through the closed test link install from alpha, so it must not lag internal. Only a live
+            # alpha release is followed: publishing to an app with no closed test would start one, and replacing a draft or
+            # halted release would override what was chosen in Play Console.
+            # Run outside the if, where a failed call would read as false instead of failing the step
+            tracks=$(play "$api/edits/$edit/tracks") || return 1
+            closed_test=$(jq -r 'any(.tracks[] | select(.track == "alpha") | .releases[]?; .status == "completed" or .status == "inProgress")' <<< "$tracks")
+            if [ "$closed_test" = true ]; then
+              play -X PUT --json "$track" "$api/edits/$edit/tracks/alpha" > /dev/null || return 1
+            fi
 
-          play -X POST "$api/edits/$edit:commit" > /dev/null
+            play -X POST "$api/edits/$edit:commit" > /dev/null
+          }
+
+          for attempt in 1 2 3; do
+            publish && exit 0
+            sleep $((attempt * 30))
+          done
+          exit 1
