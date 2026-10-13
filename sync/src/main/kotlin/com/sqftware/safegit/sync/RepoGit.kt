@@ -30,7 +30,7 @@ internal class RepoGit(private val git: Git, val repo: Repo, private val identit
      * `merge-base` and `merge-tree` use it.
      */
     fun probe(vararg args: String): GitResult =
-        run(*args).also { if (it.exitCode !in 0..NO) throw GitFailure(args.first(), it) }
+        run(*args).also { if (it.exitCode !in 0..NO) throw GitFailure(args.first { !it.startsWith("-") && "=" !in it }, it) }
 
     /** The output of a [probe] that answered yes, or null. */
     fun output(vararg args: String) = probe(*args).takeIf { it.ok }?.stdout?.trim()
@@ -41,8 +41,13 @@ internal class RepoGit(private val git: Git, val repo: Repo, private val identit
     /** The branch's commit, or null before its first one. */
     fun head() = resolve("HEAD^{commit}")
 
-    fun mergeTree(base: String, ours: String, theirs: String) =
-        MergeTree.parse(probe("merge-tree", "--write-tree", "-z", "--merge-base=$base", ours, theirs))
+    /**
+     * Merges three trees. Git would guess that a file added to a folder the other side renamed belongs in the renamed
+     * one, and ask about a path neither side has; the file stays where it was added instead.
+     */
+    fun mergeTree(base: String, ours: String, theirs: String) = MergeTree.parse(
+        probe("-c", "merge.directoryRenames=false", "merge-tree", "--write-tree", "-z", "--merge-base=$base", ours, theirs),
+    )
 
     /** [tree] with [entries], lines of `update-index -z --index-info`, applied to it. */
     fun editTree(tree: String, entries: String): String {

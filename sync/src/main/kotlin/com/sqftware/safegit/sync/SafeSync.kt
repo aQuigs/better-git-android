@@ -41,14 +41,18 @@ sealed interface SyncResult {
      */
     data class Conflict(val paths: List<String>) : SyncResult
 
-    /**
-     * Changes to [paths] that conflict markers cannot show: a binary file, an edit against a delete, a file against a
-     * folder, or names that differ only by case. Nothing changed; the next sync needs a [Keep] for each.
-     */
-    data class Choose(val paths: List<String>) : SyncResult
+    /** Changes that conflict markers cannot show. Nothing changed; the next sync needs a [Keep] for each of [choices]. */
+    data class Choose(val choices: List<Choice>) : SyncResult
 
     data class Failed(val problem: Problem, val detail: String = "") : SyncResult
 }
+
+/**
+ * A path the two sides changed in ways conflict markers cannot show: a binary file, an edit against a delete, a file
+ * against a folder, or names that differ only by case. [local] and [remote] are what each side holds there, a file's or
+ * folder's object, or null for nothing; a [Keep] answers the choice only while both still hold the same.
+ */
+data class Choice(val path: String, val local: String?, val remote: String?)
 
 /** Which side's version of a path to keep when the two cannot be combined. */
 enum class Keep { LOCAL, REMOTE }
@@ -86,7 +90,7 @@ class SafeSync(
 ) {
     private val message = "Changes from $device"
 
-    fun sync(repo: Repo, credentials: Credentials = Credentials.NONE, choices: Map<String, Keep> = emptyMap()): SyncResult = try {
+    fun sync(repo: Repo, credentials: Credentials = Credentials.NONE, choices: Map<Choice, Keep> = emptyMap()): SyncResult = try {
         Session(RepoGit(git, repo, identity), credentials, choices).sync()
     } catch (e: GitFailure) {
         SyncResult.Failed(Problem.GIT, e.message.orEmpty())
@@ -94,9 +98,10 @@ class SafeSync(
         SyncResult.Failed(Problem.FOLDER_WRITE, e.message.orEmpty())
     }
 
-    private inner class Session(private val git: RepoGit, private val credentials: Credentials, private val choices: Map<String, Keep>) {
+    private inner class Session(private val git: RepoGit, private val credentials: Credentials, private val choices: Map<Choice, Keep>) {
         private val folder = FolderUpdate(git)
-        private val held = HeldConflict(git)
+        private val markers = Markers(device)
+        private val held = HeldConflict(git, markers)
 
         fun sync(): SyncResult {
             // Nothing else uses this git dir, so a lock left now is from a sync the system killed
@@ -119,7 +124,8 @@ class SafeSync(
             repeat(ATTEMPTS) {
                 // A blocked update has just committed what blocked it, and needs no new fetch
                 if (retry != Problem.FOLDER_KEPT_CHANGING) {
-                    commitLocalChanges()
+                    stageLocalChanges().takeIf { it.isNotEmpty() }?.let { return SyncResult.Conflict(it) }
+                    commitStaged()
                     val fetch = git.run("fetch", "--quiet", remote, environment = credentials.environment())
                     if (!fetch.ok) return fetch.failed(Problem.FETCH)
                 }
@@ -133,7 +139,7 @@ class SafeSync(
                 if (behind > 0 || base?.rewound == true) {
                     val combined = if (base == null) Combined.Commit(upstreamHead!!) else combine(upstreamHead!!, base.commit)
                     val target = when (combined) {
-                        is Combined.Choose -> return SyncResult.Choose(combined.paths)
+                        is Combined.Choose -> return SyncResult.Choose(combined.choices)
                         is Combined.Commit -> combined.commit
                         is Combined.Marked -> held.record(combined.tree, upstreamHead, combined.paths)
                     }
@@ -149,7 +155,8 @@ class SafeSync(
                         is FolderUpdate.Result.WriteFailed -> return SyncResult.Failed(Problem.FOLDER_WRITE, moved.detail)
                         // Usually a file changed after the commit, e.g. a notes app saved it: commit that too and retry
                         is FolderUpdate.Result.Blocked -> {
-                            if (!commitLocalChanges()) {
+                            stageLocalChanges().takeIf { it.isNotEmpty() }?.let { return SyncResult.Conflict(it) }
+                            if (!commitStaged()) {
                                 return SyncResult.Failed(Problem.FOLDER_BLOCKED, moved.paths.joinToString("\n"))
                             }
                             retry = Problem.FOLDER_KEPT_CHANGING
@@ -174,9 +181,23 @@ class SafeSync(
             return SyncResult.Failed(retry!!)
         }
 
-        /** Commits everything changed in the folder; false when nothing was. */
-        private fun commitLocalChanges(): Boolean {
+        /**
+         * Stages everything changed in the folder, and returns the files that would gain this device's conflict markers.
+         * Those are never committed, whatever their names now: the user may have renamed a file before resolving it.
+         */
+        private fun stageLocalChanges(): List<String> {
             git.check("add", "--all")
+            val candidates = git.check("diff", "--cached", "--name-only", "--no-renames", "-z", "-G", markers.pattern).stdout.paths()
+            return candidates.filter { markerCount(":$it") > (if (git.head() == null) 0 else markerCount("HEAD:$it")) }
+        }
+
+        private fun markerCount(blob: String): Int {
+            if (git.resolve(blob) == null) return 0
+            return markers.count(git.check("cat-file", "blob", blob).stdout.lineSequence())
+        }
+
+        /** Commits what is staged; false when nothing is. */
+        private fun commitStaged(): Boolean {
             if (git.probe("diff", "--cached", "--quiet").ok) {
                 return false
             }
@@ -210,19 +231,23 @@ class SafeSync(
             val ours = spelling?.of("HEAD") ?: "HEAD"
 
             var merge = git.mergeTree(mergeBase, ours, upstreamHead)
-            var unresolved = unresolved(merge, spelling)
-            // Choices count only for conflicts there are now: one made earlier could undo a later edit
-            if (unresolved.isNotEmpty() && unresolved.all { it in choices }) {
-                val (keptOurs, keptTheirs) = keep(unresolved.associateWith { choices.getValue(it) }, ours, upstreamHead)
+            var asked = ask(unresolved(merge, spelling), ours, upstreamHead)
+            // A choice made against other versions could undo an edit made since, so those are asked again
+            if (asked.isNotEmpty() && asked.all { it in choices }) {
+                val (keptOurs, keptTheirs) = keep(asked.associate { it.path to choices.getValue(it) }, ours, upstreamHead)
                 merge = git.mergeTree(mergeBase, keptOurs, keptTheirs)
-                unresolved = unresolved(merge, spelling)
+                asked = ask(unresolved(merge, spelling), ours, upstreamHead)
             }
-            if (unresolved.isNotEmpty()) {
-                return Combined.Choose(unresolved)
+            if (asked.isNotEmpty()) {
+                return Combined.Choose(asked)
             }
 
             if (merge.marked.isNotEmpty()) {
-                val tree = git.editTree(merge.tree, merge.marked.joinToString("") { indexEntry(it.ours.mode, markedBlob(it), it.path) })
+                val tree = git.editTree(
+                    merge.tree,
+                    // The mode a side changed, as the merge took it
+                    merge.marked.joinToString("") { indexEntry(if (it.ours.mode == it.base?.mode) it.theirs.mode else it.ours.mode, markedBlob(it), it.path) },
+                )
                 return Combined.Marked(tree, merge.marked.map { it.path }.sorted())
             }
             // Nothing local is left once the remote already has it all, e.g. after resolving to its version
@@ -238,9 +263,13 @@ class SafeSync(
             if (spelling == null) return unmarkable.sorted()
             // Git sees no conflict in names that differ only by case; the remote's own are not the local changes' doing
             val clashes = caseClashes(git.check("ls-tree", "-r", "-z", "--name-only", merge.tree).stdout.paths())
-                .filter { group -> group.any { it !in spelling.paths } }
+                .filter { group -> group.any { !spelling.has(it) } }
             return (unmarkable + clashes.flatten()).distinct().sorted()
         }
+
+        // Git also names the old path of a file renamed on one side, which neither side has any more
+        private fun ask(paths: List<String>, ours: String, theirs: String) =
+            paths.map { Choice(it, git.resolve("$ours:$it"), git.resolve("$theirs:$it")) }.filter { it.local != null || it.remote != null }
 
         /**
          * [ours] and [theirs] with each chosen path, a file or everything in a folder, made the same on both sides: the
@@ -267,8 +296,9 @@ class SafeSync(
          * names the sides by commit, which says nothing to someone reading the note.
          */
         private fun markedBlob(file: MergeTree.Conflicted): String {
+            // The same diff as merge-tree's, so the markers fall where git found the conflict
             val merged = git.run(
-                "merge-file", "--object-id", "-L", device, "-L", "base", "-L", "remote",
+                "merge-file", "--diff-algorithm=histogram", "--object-id", "-L", device, "-L", "base", "-L", "remote",
                 file.ours.blob, file.base?.blob ?: git.emptyBlob, file.theirs.blob,
             )
             // Exits with the number of conflicts, up to 127
@@ -285,7 +315,7 @@ class SafeSync(
         /** A tree whose [paths] hold conflict markers. */
         data class Marked(val tree: String, val paths: List<String>) : Combined
 
-        data class Choose(val paths: List<String>) : Combined
+        data class Choose(val choices: List<Choice>) : Combined
     }
 
     private fun GitResult.failed(problem: Problem) = SyncResult.Failed(problem, stderr.trim())

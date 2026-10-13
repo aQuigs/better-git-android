@@ -6,8 +6,12 @@ package com.sqftware.safegit.sync
  */
 internal class RemoteSpelling(private val git: RepoGit, private val upstreamHead: String) {
     val paths = git.check("ls-tree", "-r", "-z", "--name-only", upstreamHead).stdout.paths().toSet()
+    private val folderPaths = paths.flatMap(::foldersOf).toSet()
     private val files = unambiguous(paths)
-    private val folders = unambiguous(paths.flatMap(::foldersOf).distinct())
+    private val folders = unambiguous(folderPaths)
+
+    /** Whether the remote has a file or folder under exactly [name]. */
+    fun has(name: String) = name in paths || name in folderPaths
 
     /**
      * [commit]'s tree with each path the remote spells in another case, by its file name or a folder's, renamed to the
@@ -45,12 +49,12 @@ internal class RemoteSpelling(private val git: RepoGit, private val upstreamHead
 }
 
 /**
- * Groups of [paths] a case-insensitive folder cannot hold side by side: two files, or a file and a folder, whose names
- * differ only by case. Folders that differ only by case are one folder there, so they never clash.
+ * Groups of names among [paths] that a case-insensitive folder cannot hold side by side: two files, or a file and a
+ * folder, whose names differ only by case. Folders that differ only by case are one folder there, so they never clash.
  */
 internal fun caseClashes(paths: Collection<String>): List<List<String>> {
     val files = paths.groupBy { it.lowercase() }
-    val folders = paths.flatMap { path -> foldersOf(path).map { it.lowercase() to path } }.groupBy({ it.first }, { it.second })
+    val folders = paths.flatMap(::foldersOf).distinct().groupBy { it.lowercase() }
     return files.values.filter { it.size > 1 } + files.mapNotNull { (name, same) -> folders[name]?.let { same + it } }
 }
 
