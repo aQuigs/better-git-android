@@ -11,6 +11,7 @@ import com.sqftware.safegit.git.GitResult
  */
 internal class RepoGit(private val git: Git, val repo: Repo, private val identity: Identity) {
     val emptyTree by lazy { check("mktree").stdout.trim() }
+    val emptyBlob by lazy { check("hash-object", "-w", "--stdin").stdout.trim() }
     val ignoreCase by lazy { output("config", "--bool", "core.ignorecase") == "true" }
 
     fun run(vararg args: String, environment: Map<String, String> = emptyMap(), input: String = ""): GitResult = git.run(
@@ -39,6 +40,19 @@ internal class RepoGit(private val git: Git, val repo: Repo, private val identit
 
     /** The branch's commit, or null before its first one. */
     fun head() = resolve("HEAD^{commit}")
+
+    /** [tree] with [entries], lines of `update-index -z --index-info`, applied to it. */
+    fun editTree(tree: String, entries: String): String {
+        val indexFile = repo.gitDir.resolve("safegit-edit.index")
+        val index = mapOf("GIT_INDEX_FILE" to indexFile.path)
+        try {
+            check("read-tree", tree, environment = index)
+            check("update-index", "-z", "--index-info", environment = index, input = entries)
+            return check("write-tree", environment = index).stdout.trim()
+        } finally {
+            indexFile.delete()
+        }
+    }
 
     /** Every path that differs from [from] to [to], without guessing renames. */
     fun diff(from: String, to: String): List<Change> =

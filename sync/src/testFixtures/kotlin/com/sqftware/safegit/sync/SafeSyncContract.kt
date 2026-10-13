@@ -131,45 +131,177 @@ abstract class SafeSyncContract(tempParent: File? = null, workTreeParent: File? 
     }
 
     @Test
-    fun conflictLeavesEverythingAsItWas() {
+    fun aConflictPutsBothVersionsInTheFileAndSyncsTheRest() {
         laptop.write("notes.md", "one\nLAPTOP\nthree\n")
+        laptop.write("laptop.md", "from the laptop\n")
         laptop.commitAndPush("laptop edit")
         val remoteHead = git.ok(remote, "rev-parse", "main")
         files.write("notes.md", "one\nPHONE\nthree\n")
 
         assertEquals(SyncResult.Conflict(listOf("notes.md")), sync())
 
-        assertEquals("one\nPHONE\nthree\n", files.read("notes.md"))
-        assertEquals("Changes from Pixel", phoneGit("log", "-1", "--format=%s"))
-        assertEquals("", phoneGit("status", "--porcelain"))
+        assertEquals("one\n<<<<<<< Pixel\nPHONE\n=======\nLAPTOP\n>>>>>>> remote\nthree\n", files.read("notes.md"))
+        assertEquals("from the laptop\n", files.read("laptop.md"))
         assertEquals(remoteHead, git.ok(remote, "rev-parse", "main"))
     }
 
     @Test
-    fun aConflictClearsOnceTheFilesAgree() {
+    fun pushesNothingWhileMarkersAreLeft() {
+        laptop.write("notes.md", "one\nLAPTOP\nthree\n")
+        laptop.commitAndPush("laptop edit")
+        val remoteHead = git.ok(remote, "rev-parse", "main")
+        files.write("notes.md", "one\nPHONE\nthree\n")
+        files.write("ideas.md", "merges cleanly\n")
+        sync()
+        files.write("other.md", "an edit while the conflict is open\n")
+
+        assertEquals(SyncResult.Conflict(listOf("notes.md")), sync())
+
+        assertEquals(remoteHead, git.ok(remote, "rev-parse", "main"))
+    }
+
+    @Test
+    fun pushesTheResolutionWithEverythingElseOnceTheMarkersAreGone() {
+        laptop.write("notes.md", "one\nLAPTOP\nthree\n")
+        laptop.commitAndPush("laptop edit")
+        files.write("notes.md", "one\nPHONE\nthree\n")
+        files.write("ideas.md", "merges cleanly\n")
+        sync()
+
+        files.write("notes.md", "one\nPHONE and LAPTOP\nthree\n")
+        files.write("other.md", "an edit while the conflict was open\n")
+
+        assertEquals(SyncResult.Synced(pulled = 0, pushed = 1), sync())
+        laptopPull()
+        assertEquals("one\nPHONE and LAPTOP\nthree\n", laptop.read("notes.md"))
+        assertEquals("merges cleanly\n", laptop.read("ideas.md"))
+        assertEquals("an edit while the conflict was open\n", laptop.read("other.md"))
+        assertEquals(SyncResult.UpToDate, sync())
+        assertEquals("", phoneGit("status", "--porcelain"))
+    }
+
+    @Test
+    fun aResolutionMergesWithWhatTheRemoteGotMeanwhile() {
+        laptop.write("notes.md", "one\nLAPTOP\nthree\n")
+        laptop.commitAndPush("laptop edit")
+        files.write("notes.md", "one\nPHONE\nthree\n")
+        sync()
+        laptop.write("later.md", "pushed while the phone resolved\n")
+        laptop.commitAndPush("later")
+
+        files.write("notes.md", "one\nresolved\nthree\n")
+
+        assertEquals(SyncResult.Synced(pulled = 1, pushed = 1), sync())
+        assertEquals("pushed while the phone resolved\n", files.read("later.md"))
+        laptopPull()
+        assertEquals("one\nresolved\nthree\n", laptop.read("notes.md"))
+    }
+
+    @Test
+    fun deletingAConflictedFileResolvesItAsDeleted() {
         laptop.write("notes.md", "one\nLAPTOP\nthree\n")
         laptop.commitAndPush("laptop edit")
         files.write("notes.md", "one\nPHONE\nthree\n")
         sync()
 
-        files.write("notes.md", "one\nLAPTOP\nthree\n")
-        files.write("other.md", "an unrelated edit")
+        files.resolve("notes.md").delete()
 
-        assertEquals(SyncResult.Synced(pulled = 1, pushed = 1), sync())
+        assertEquals(SyncResult.Synced(pulled = 0, pushed = 1), sync())
         laptopPull()
-        assertEquals("an unrelated edit", laptop.read("other.md"))
-        assertEquals(SyncResult.UpToDate, sync())
+        assertFalse(laptop.resolve("notes.md").exists())
     }
 
     @Test
-    fun neverOverwritesALocalFileThatTheRemoteAddsToo() {
-        laptop.write("to do café.md", "laptop list")
+    fun aConflictSurvivesTheAppKilledAtTheLastStep() = aConflictSurvives(git.dyingAtTheLastStep())
+
+    @Test
+    fun aConflictSurvivesTheAppKilledBeforeTheBranchMoves() = aConflictSurvives(git.dyingBeforeTheBranchMoves())
+
+    @Test
+    fun aConflictSurvivesTheAppKilledAfterTheBranchMoved() = aConflictSurvives(git.dyingAfterTheBranchMoved())
+
+    private fun aConflictSurvives(dying: Git) {
+        laptop.write("notes.md", "one\nLAPTOP\nthree\n")
+        laptop.commitAndPush("laptop edit")
+        val remoteHead = git.ok(remote, "rev-parse", "main")
+        files.write("notes.md", "one\nPHONE\nthree\n")
+
+        assertThrows(Killed::class.java) { sync(dying) }
+
+        assertEquals(SyncResult.Conflict(listOf("notes.md")), sync())
+        assertEquals(remoteHead, git.ok(remote, "rev-parse", "main"))
+        assertTrue(files.read("notes.md"), "<<<<<<< Pixel" in files.read("notes.md"))
+    }
+
+    @Test
+    fun aFileBothSidesAddedHoldsBothVersions() {
+        laptop.write("to do café.md", "laptop list\n")
         laptop.commitAndPush("laptop todo")
-        files.write("to do café.md", "phone list")
+        files.write("to do café.md", "phone list\n")
 
         assertEquals(SyncResult.Conflict(listOf("to do café.md")), sync())
 
-        assertEquals("phone list", files.read("to do café.md"))
+        assertEquals("<<<<<<< Pixel\nphone list\n=======\nlaptop list\n>>>>>>> remote\n", files.read("to do café.md"))
+    }
+
+    @Test
+    fun asksWhichVersionOfABinaryFileToKeep() {
+        laptop.resolve("photo.png").writeBytes(byteArrayOf(0, 1, 2))
+        laptop.commitAndPush("photo")
+        sync()
+        laptop.resolve("photo.png").writeBytes(byteArrayOf(0, 1, 3))
+        laptop.commitAndPush("laptop photo")
+        files.resolve("photo.png").writeBytes(byteArrayOf(0, 1, 4))
+
+        assertEquals(SyncResult.Choose(listOf("photo.png")), sync())
+        assertEquals(listOf<Byte>(0, 1, 4), files.resolve("photo.png").readBytes().toList())
+
+        assertEquals(SyncResult.Synced(pulled = 1, pushed = 1), sync(choices = mapOf("photo.png" to Keep.LOCAL)))
+        laptopPull()
+        assertEquals(listOf<Byte>(0, 1, 4), laptop.resolve("photo.png").readBytes().toList())
+    }
+
+    @Test
+    fun keepsTheRemotesVersionWhenChosen() {
+        laptop.resolve("photo.png").writeBytes(byteArrayOf(0, 1, 2))
+        laptop.commitAndPush("photo")
+        sync()
+        laptop.resolve("photo.png").writeBytes(byteArrayOf(0, 1, 3))
+        laptop.commitAndPush("laptop photo")
+        files.resolve("photo.png").writeBytes(byteArrayOf(0, 1, 4))
+        files.write("ideas.md", "kept too\n")
+
+        assertEquals(SyncResult.Synced(pulled = 1, pushed = 1), sync(choices = mapOf("photo.png" to Keep.REMOTE)))
+
+        assertEquals(listOf<Byte>(0, 1, 3), files.resolve("photo.png").readBytes().toList())
+        assertEquals("kept too\n", files.read("ideas.md"))
+        assertEquals(listOf<Byte>(0, 1, 4), phoneGit("cat-file", "-p", "refs/safegit/backup/1000:photo.png").toByteArray().toList())
+    }
+
+    @Test
+    fun asksWhetherToKeepAFileTheOtherSideDeleted() {
+        git.ok(laptop, "rm", "-q", "notes.md")
+        laptop.commitAndPush("delete notes")
+        files.write("notes.md", "one\nedited\nthree\n")
+
+        assertEquals(SyncResult.Choose(listOf("notes.md")), sync())
+        assertEquals("one\nedited\nthree\n", files.read("notes.md"))
+
+        assertEquals(SyncResult.Synced(pulled = 1, pushed = 1), sync(choices = mapOf("notes.md" to Keep.LOCAL)))
+        laptopPull()
+        assertEquals("one\nedited\nthree\n", laptop.read("notes.md"))
+    }
+
+    @Test
+    fun aChoiceCountsOnlyForAConflictThereIsNow() {
+        laptop.write("laptop.md", "the remote moved on\n")
+        laptop.commitAndPush("laptop file")
+        files.write("notes.md", "one\nedited\nthree\n")
+
+        assertEquals(SyncResult.Synced(pulled = 1, pushed = 1), sync(choices = mapOf("notes.md" to Keep.REMOTE)))
+
+        laptopPull()
+        assertEquals("one\nedited\nthree\n", laptop.read("notes.md"))
     }
 
     @Test
@@ -193,8 +325,7 @@ abstract class SafeSyncContract(tempParent: File? = null, workTreeParent: File? 
         val result = sync(editsDuringUpdate)
 
         assertTrue(result.toString(), result is SyncResult.Conflict)
-        assertEquals("edited mid-sync\n", files.read("notes.md"))
-        assertEquals("", phoneGit("status", "--porcelain"))
+        assertTrue(files.read("notes.md"), "edited mid-sync\n" in files.read("notes.md"))
     }
 
     @Test
@@ -532,9 +663,9 @@ abstract class SafeSyncContract(tempParent: File? = null, workTreeParent: File? 
 
         if (caseInsensitive) {
             assertEquals(SyncResult.Conflict(listOf("TODO.md")), result)
-            files.write("todo.md", "from the laptop\n")
-            assertEquals(SyncResult.Synced(pulled = 1, pushed = 0), sync())
             assertEquals(listOf("TODO.md", "notes.md"), files.list()!!.sorted())
+            files.write("todo.md", "from the laptop\n")
+            assertEquals(SyncResult.UpToDate, sync())
         } else {
             assertEquals(SyncResult.Synced(pulled = 1, pushed = 1), result)
             assertEquals("from the phone\n", files.read("todo.md"))
@@ -551,8 +682,11 @@ abstract class SafeSyncContract(tempParent: File? = null, workTreeParent: File? 
         val result = sync()
 
         if (caseInsensitive) {
-            assertEquals(SyncResult.Conflict(listOf("PLAN", "plan/week.md")), result)
+            assertEquals(SyncResult.Choose(listOf("PLAN", "plan/week.md")), result)
             assertEquals("a folder on the phone", files.read("plan/week.md"))
+            val keepFolder = mapOf("PLAN" to Keep.LOCAL, "plan/week.md" to Keep.LOCAL)
+            assertEquals(SyncResult.Synced(pulled = 1, pushed = 1), sync(choices = keepFolder))
+            assertEquals(listOf("notes.md", "plan"), files.list()!!.sorted())
         } else {
             assertEquals(SyncResult.Synced(pulled = 1, pushed = 1), result)
         }
@@ -568,7 +702,8 @@ abstract class SafeSyncContract(tempParent: File? = null, workTreeParent: File? 
 
         sync()
 
-        assertEquals("edited on the phone\n", files.read("Notes.md"))
+        // Case-sensitive storage sees the phone's file and the remote's rename as added twice, so both are in it
+        assertTrue(files.read("Notes.md"), "edited on the phone\n" in files.read("Notes.md"))
         assertTrue(phoneGit("log", "--all", "--format=%H", "-S", "edited on the phone").isNotEmpty())
     }
 
@@ -633,7 +768,7 @@ abstract class SafeSyncContract(tempParent: File? = null, workTreeParent: File? 
         laptop.write("plan", "now a file")
         laptop.commitAndPush("plan as a file")
 
-        assertTrue(sync() is SyncResult.Conflict)
+        assertEquals(SyncResult.Choose(listOf("plan")), sync())
 
         assertEquals("only on the phone", files.read("plan/mine.md"))
     }
@@ -679,8 +814,8 @@ abstract class SafeSyncContract(tempParent: File? = null, workTreeParent: File? 
         assertEquals(SyncResult.Failed(Problem.NO_UPSTREAM), sync())
     }
 
-    private fun sync(git: Git = this.git, repo: Repo = phone) =
-        SafeSync(git, Identity("Phone", "phone@example.com"), device = "Pixel", now = { 1000 }).sync(repo)
+    private fun sync(git: Git = this.git, repo: Repo = phone, choices: Map<String, Keep> = emptyMap()) =
+        SafeSync(git, Identity("Phone", "phone@example.com"), device = "Pixel", now = { 1000 }).sync(repo, choices = choices)
 
     private fun clone(name: String, from: File = remote) = temp.root.resolve(name).also {
         git.ok(temp.root, "clone", "-q", from.path, it.path)

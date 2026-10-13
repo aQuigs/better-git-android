@@ -26,19 +26,13 @@ internal class RemoteSpelling(private val git: RepoGit, private val upstreamHead
             .groupBy { it.second }.values.mapNotNull { it.singleOrNull() }
         if (renames.isEmpty()) return commit
 
-        val indexFile = git.repo.gitDir.resolve("safegit-spelling.index")
-        val index = mapOf("GIT_INDEX_FILE" to indexFile.path)
-        try {
-            git.check("read-tree", commit, environment = index)
-            val entries = renames.joinToString("") { (path, renamed) ->
+        return git.editTree(
+            commit,
+            renames.joinToString("") { (path, renamed) ->
                 val change = gone.getValue(path)
                 indexEntry(change.newMode, change.newBlob, path) + indexEntry(change.oldMode, change.oldBlob, renamed)
-            }
-            git.check("update-index", "-z", "--index-info", environment = index, input = entries)
-            return git.check("write-tree", environment = index).stdout.trim()
-        } finally {
-            indexFile.delete()
-        }
+            },
+        )
     }
 
     private fun respell(path: String): String? {
