@@ -96,6 +96,7 @@ class SafeSync(
 
     private inner class Session(private val git: RepoGit, private val credentials: Credentials, private val choices: Map<String, Keep>) {
         private val folder = FolderUpdate(git)
+        private val held = HeldConflict(git)
 
         fun sync(): SyncResult {
             // Nothing else uses this git dir, so a lock left now is from a sync the system killed
@@ -111,7 +112,7 @@ class SafeSync(
             val upstream = "refs/remotes/$remote/${merge.removePrefix("refs/heads/")}"
 
             folder.resume()?.let { return SyncResult.Failed(Problem.FOLDER_WRITE, it.detail) }
-            markersLeft()?.let { return it }
+            held.left()?.let { return SyncResult.Conflict(it) }
 
             var pulled = 0
             var retry: Problem? = null
@@ -130,24 +131,19 @@ class SafeSync(
                 var pushing = ahead
 
                 if (behind > 0 || base?.rewound == true) {
-                    var marked: Combined.Marked? = null
-                    val target = if (base == null) {
-                        upstreamHead!!
-                    } else {
-                        when (val combined = combine(upstreamHead!!, base.commit)) {
-                            is Combined.Choose -> return SyncResult.Choose(combined.paths)
-                            is Combined.Commit -> combined.commit
-                            // Recorded before the folder moves, so a sync killed after the branch moved still holds the push
-                            is Combined.Marked -> combined.commit.also {
-                                marked = combined
-                                git.check("update-ref", CONFLICT, it)
-                            }
-                        }.also { git.check("update-ref", "refs/safegit/backup/${now()}", head!!) }
+                    val combined = if (base == null) Combined.Commit(upstreamHead!!) else combine(upstreamHead!!, base.commit)
+                    val target = when (combined) {
+                        is Combined.Choose -> return SyncResult.Choose(combined.paths)
+                        is Combined.Commit -> combined.commit
+                        is Combined.Marked -> held.record(combined.tree, upstreamHead, combined.paths)
+                    }
+                    if (base != null) {
+                        git.check("update-ref", "refs/safegit/backup/${now()}", head!!)
                     }
 
                     when (val moved = folder.move(from = head ?: git.emptyTree, to = target)) {
                         FolderUpdate.Result.Done -> {
-                            marked?.let { return SyncResult.Conflict(it.paths) }
+                            if (combined is Combined.Marked) return SyncResult.Conflict(combined.paths)
                             pulled += behind
                         }
                         is FolderUpdate.Result.WriteFailed -> return SyncResult.Failed(Problem.FOLDER_WRITE, moved.detail)
@@ -177,33 +173,6 @@ class SafeSync(
             }
             return SyncResult.Failed(retry!!)
         }
-
-        /**
-         * While the branch is at a commit with conflict markers, holds the sync until no marked file has them left. Then
-         * takes that commit off the branch, leaving its files to be committed with the resolution.
-         */
-        private fun markersLeft(): SyncResult? {
-            val marked = git.resolve(CONFLICT) ?: return null
-            if (marked != git.head()) {
-                // The update to it was undone
-                git.check("update-ref", "-d", CONFLICT, marked)
-                return null
-            }
-            // The message is the subject, then one marked path per line
-            val paths = git.check("cat-file", "commit", marked).stdout.substringAfter("\n\n").substringAfter("\n\n").lines()
-                .filter { it.isNotEmpty() }
-            val left = paths.filter { hasMarkers(git.repo.workTree.resolve(it)) }
-            if (left.isNotEmpty()) {
-                return SyncResult.Conflict(left)
-            }
-            val parent = git.check("rev-parse", "$marked^").stdout.trim()
-            git.check("update-ref", "--stdin", input = "update HEAD $parent $marked\ndelete $CONFLICT $marked\n")
-            return null
-        }
-
-        // "=======" alone is no sign, since Markdown underlines a heading with it
-        private fun hasMarkers(file: File) =
-            file.isFile && file.useLines { lines -> lines.any { it.startsWith("<<<<<<<") || it.startsWith(">>>>>>>") } }
 
         /** Commits everything changed in the folder; false when nothing was. */
         private fun commitLocalChanges(): Boolean {
@@ -240,12 +209,12 @@ class SafeSync(
             val mergeBase = spelling?.of(base) ?: base
             val ours = spelling?.of("HEAD") ?: "HEAD"
 
-            var merge = MergeTree(git, mergeBase, ours, upstreamHead)
+            var merge = git.mergeTree(mergeBase, ours, upstreamHead)
             var unresolved = unresolved(merge, spelling)
             // Choices count only for conflicts there are now: one made earlier could undo a later edit
             if (unresolved.isNotEmpty() && unresolved.all { it in choices }) {
                 val (keptOurs, keptTheirs) = keep(unresolved.associateWith { choices.getValue(it) }, ours, upstreamHead)
-                merge = MergeTree(git, mergeBase, keptOurs, keptTheirs)
+                merge = git.mergeTree(mergeBase, keptOurs, keptTheirs)
                 unresolved = unresolved(merge, spelling)
             }
             if (unresolved.isNotEmpty()) {
@@ -253,10 +222,8 @@ class SafeSync(
             }
 
             if (merge.marked.isNotEmpty()) {
-                val paths = merge.marked.map { it.path }.sorted()
-                val tree = git.editTree(merge.tree, merge.marked.joinToString("") { indexEntry(it.ours.mode, markers(it), it.path) })
-                val conflict = "Conflict in ${paths.size} file(s)\n\n${paths.joinToString("\n")}"
-                return Combined.Marked(git.check("commit-tree", tree, "-p", upstreamHead, "-m", conflict).stdout.trim(), paths)
+                val tree = git.editTree(merge.tree, merge.marked.joinToString("") { indexEntry(it.ours.mode, markedBlob(it), it.path) })
+                return Combined.Marked(tree, merge.marked.map { it.path }.sorted())
             }
             // Nothing local is left once the remote already has it all, e.g. after resolving to its version
             if (merge.tree == git.resolve("$upstreamHead^{tree}")) {
@@ -267,12 +234,12 @@ class SafeSync(
 
         /** What [merge] cannot show with markers, including names a case-insensitive folder cannot hold side by side. */
         private fun unresolved(merge: MergeTree, spelling: RemoteSpelling?): List<String> {
-            if (spelling == null) return merge.unmarkable
+            val unmarkable = merge.unmarkable + merge.marked.map { it.path }.filterNot(HeldConflict::canRecord)
+            if (spelling == null) return unmarkable.sorted()
             // Git sees no conflict in names that differ only by case; the remote's own are not the local changes' doing
-            val theirs = spelling.paths.toSet()
             val clashes = caseClashes(git.check("ls-tree", "-r", "-z", "--name-only", merge.tree).stdout.paths())
-                .filter { group -> group.any { it !in theirs } }
-            return (merge.unmarkable + clashes.flatten()).distinct().sorted()
+                .filter { group -> group.any { it !in spelling.paths } }
+            return (unmarkable + clashes.flatten()).distinct().sorted()
         }
 
         /**
@@ -280,20 +247,13 @@ class SafeSync(
          * kept side's version replaces the other's, so the merge takes it.
          */
         private fun keep(kept: Map<String, Keep>, ours: String, theirs: String): Pair<String, String> {
-            // Entries are "<mode> <type> <object>\t<path>"
-            val entries = mapOf(Keep.LOCAL to ours, Keep.REMOTE to theirs)
-                .mapValues { (_, tree) -> git.check("ls-tree", "-r", "-z", tree).stdout.paths() }
-            fun replacing(keep: Keep): String = kept.filterValues { it == keep }.keys.joinToString("") { path ->
-                fun under(entry: String) = entry.substringAfter("\t").let { it == path || it.startsWith("$path/") }
-                val other = if (keep == Keep.LOCAL) Keep.REMOTE else Keep.LOCAL
-                entries.getValue(other).filter(::under).joinToString("") { entry ->
-                    val blob = entry.substringBefore("\t").split(" ")[2]
-                    indexEntry(Change.ABSENT, "0".repeat(blob.length), entry.substringAfter("\t"))
-                } + entries.getValue(keep).filter(::under).joinToString("") { entry ->
-                    val (mode, _, blob) = entry.substringBefore("\t").split(" ")
-                    indexEntry(mode, blob, entry.substringAfter("\t"))
-                }
-            }
+            val differences = git.diff(ours, theirs)
+            fun replacing(keep: Keep): String = kept.filterValues { it == keep }.keys
+                .flatMap { path -> differences.filter { it.path == path || it.path.startsWith("$path/") } }
+                .map { if (keep == Keep.LOCAL) Triple(it.oldMode, it.oldBlob, it.path) else Triple(it.newMode, it.newBlob, it.path) }
+                // Removals first, so that a file never meets the folder it replaces
+                .sortedBy { (mode) -> mode != Change.ABSENT }
+                .joinToString("") { (mode, blob, path) -> indexEntry(mode, blob, path) }
             val intoOurs = replacing(Keep.REMOTE)
             val intoTheirs = replacing(Keep.LOCAL)
             return Pair(
@@ -302,11 +262,14 @@ class SafeSync(
             )
         }
 
-        /** The file with both versions between markers named for each side, which git would name by commit. */
-        private fun markers(file: MergeTree.Stages): String {
+        /**
+         * The file with both versions between markers named for each side. merge-tree has written one already, but
+         * names the sides by commit, which says nothing to someone reading the note.
+         */
+        private fun markedBlob(file: MergeTree.Conflicted): String {
             val merged = git.run(
                 "merge-file", "--object-id", "-L", device, "-L", "base", "-L", "remote",
-                file.ours.blob, file.base ?: git.emptyBlob, file.theirs.blob,
+                file.ours.blob, file.base?.blob ?: git.emptyBlob, file.theirs.blob,
             )
             // Exits with the number of conflicts, up to 127
             if (merged.exitCode !in 0..MAX_CONFLICTS) throw GitFailure("merge-file", merged)
@@ -319,8 +282,8 @@ class SafeSync(
     private sealed interface Combined {
         data class Commit(val commit: String) : Combined
 
-        /** A commit whose [paths] hold conflict markers, never to be pushed. */
-        data class Marked(val commit: String, val paths: List<String>) : Combined
+        /** A tree whose [paths] hold conflict markers. */
+        data class Marked(val tree: String, val paths: List<String>) : Combined
 
         data class Choose(val paths: List<String>) : Combined
     }
@@ -330,6 +293,5 @@ class SafeSync(
     private companion object {
         const val ATTEMPTS = 3
         const val MAX_CONFLICTS = 127
-        const val CONFLICT = "refs/safegit/conflict"
     }
 }

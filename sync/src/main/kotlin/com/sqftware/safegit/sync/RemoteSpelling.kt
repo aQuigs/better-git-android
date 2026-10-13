@@ -5,8 +5,7 @@ package com.sqftware.safegit.sync
  * file under either spelling of its name, so a local file the remote spells in another case is the remote's file.
  */
 internal class RemoteSpelling(private val git: RepoGit, private val upstreamHead: String) {
-    val paths = git.check("ls-tree", "-r", "-z", "--name-only", upstreamHead).stdout.paths()
-    private val pathSet = paths.toSet()
+    val paths = git.check("ls-tree", "-r", "-z", "--name-only", upstreamHead).stdout.paths().toSet()
     private val files = unambiguous(paths)
     private val folders = unambiguous(paths.flatMap(::foldersOf).distinct())
 
@@ -20,7 +19,7 @@ internal class RemoteSpelling(private val git: RepoGit, private val upstreamHead
         val changes = git.diff(commit, upstreamHead)
         val gone = changes.filter { it.oldMode != Change.ABSENT && it.newMode == Change.ABSENT }.associateBy { it.path }
         val added = changes.filter { it.oldMode == Change.ABSENT }.map { it.path }.toSet()
-        fun inCommit(path: String) = if (path in pathSet) path !in added else path in gone
+        fun inCommit(path: String) = if (path in paths) path !in added else path in gone
 
         val renames = gone.keys.mapNotNull { path -> respell(path)?.takeIf { !inCommit(it) }?.let { path to it } }
             .groupBy { it.second }.values.mapNotNull { it.singleOrNull() }
@@ -41,7 +40,7 @@ internal class RemoteSpelling(private val git: RepoGit, private val upstreamHead
         return (folders.getValue(folder.lowercase()) + path.substring(folder.length)).takeIf { it != path }
     }
 
-    private fun unambiguous(names: List<String>) =
+    private fun unambiguous(names: Collection<String>) =
         names.groupBy { it.lowercase() }.filterValues { it.distinct().size == 1 }.mapValues { it.value.first() }
 }
 

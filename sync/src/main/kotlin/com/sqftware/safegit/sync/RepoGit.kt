@@ -41,6 +41,9 @@ internal class RepoGit(private val git: Git, val repo: Repo, private val identit
     /** The branch's commit, or null before its first one. */
     fun head() = resolve("HEAD^{commit}")
 
+    fun mergeTree(base: String, ours: String, theirs: String) =
+        MergeTree.parse(probe("merge-tree", "--write-tree", "-z", "--merge-base=$base", ours, theirs))
+
     /** [tree] with [entries], lines of `update-index -z --index-info`, applied to it. */
     fun editTree(tree: String, entries: String): String {
         val indexFile = repo.gitDir.resolve("safegit-edit.index")

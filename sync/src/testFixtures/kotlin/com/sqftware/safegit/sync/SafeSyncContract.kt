@@ -132,11 +132,8 @@ abstract class SafeSyncContract(tempParent: File? = null, workTreeParent: File? 
 
     @Test
     fun aConflictPutsBothVersionsInTheFileAndSyncsTheRest() {
-        laptop.write("notes.md", "one\nLAPTOP\nthree\n")
         laptop.write("laptop.md", "from the laptop\n")
-        laptop.commitAndPush("laptop edit")
-        val remoteHead = git.ok(remote, "rev-parse", "main")
-        files.write("notes.md", "one\nPHONE\nthree\n")
+        val remoteHead = conflictInNotes()
 
         assertEquals(SyncResult.Conflict(listOf("notes.md")), sync())
 
@@ -147,10 +144,7 @@ abstract class SafeSyncContract(tempParent: File? = null, workTreeParent: File? 
 
     @Test
     fun pushesNothingWhileMarkersAreLeft() {
-        laptop.write("notes.md", "one\nLAPTOP\nthree\n")
-        laptop.commitAndPush("laptop edit")
-        val remoteHead = git.ok(remote, "rev-parse", "main")
-        files.write("notes.md", "one\nPHONE\nthree\n")
+        val remoteHead = conflictInNotes()
         files.write("ideas.md", "merges cleanly\n")
         sync()
         files.write("other.md", "an edit while the conflict is open\n")
@@ -162,9 +156,7 @@ abstract class SafeSyncContract(tempParent: File? = null, workTreeParent: File? 
 
     @Test
     fun pushesTheResolutionWithEverythingElseOnceTheMarkersAreGone() {
-        laptop.write("notes.md", "one\nLAPTOP\nthree\n")
-        laptop.commitAndPush("laptop edit")
-        files.write("notes.md", "one\nPHONE\nthree\n")
+        conflictInNotes()
         files.write("ideas.md", "merges cleanly\n")
         sync()
 
@@ -182,9 +174,7 @@ abstract class SafeSyncContract(tempParent: File? = null, workTreeParent: File? 
 
     @Test
     fun aResolutionMergesWithWhatTheRemoteGotMeanwhile() {
-        laptop.write("notes.md", "one\nLAPTOP\nthree\n")
-        laptop.commitAndPush("laptop edit")
-        files.write("notes.md", "one\nPHONE\nthree\n")
+        conflictInNotes()
         sync()
         laptop.write("later.md", "pushed while the phone resolved\n")
         laptop.commitAndPush("later")
@@ -199,9 +189,7 @@ abstract class SafeSyncContract(tempParent: File? = null, workTreeParent: File? 
 
     @Test
     fun deletingAConflictedFileResolvesItAsDeleted() {
-        laptop.write("notes.md", "one\nLAPTOP\nthree\n")
-        laptop.commitAndPush("laptop edit")
-        files.write("notes.md", "one\nPHONE\nthree\n")
+        conflictInNotes()
         sync()
 
         files.resolve("notes.md").delete()
@@ -221,10 +209,7 @@ abstract class SafeSyncContract(tempParent: File? = null, workTreeParent: File? 
     fun aConflictSurvivesTheAppKilledAfterTheBranchMoved() = aConflictSurvives(git.dyingAfterTheBranchMoved())
 
     private fun aConflictSurvives(dying: Git) {
-        laptop.write("notes.md", "one\nLAPTOP\nthree\n")
-        laptop.commitAndPush("laptop edit")
-        val remoteHead = git.ok(remote, "rev-parse", "main")
-        files.write("notes.md", "one\nPHONE\nthree\n")
+        val remoteHead = conflictInNotes()
 
         assertThrows(Killed::class.java) { sync(dying) }
 
@@ -246,12 +231,7 @@ abstract class SafeSyncContract(tempParent: File? = null, workTreeParent: File? 
 
     @Test
     fun asksWhichVersionOfABinaryFileToKeep() {
-        laptop.resolve("photo.png").writeBytes(byteArrayOf(0, 1, 2))
-        laptop.commitAndPush("photo")
-        sync()
-        laptop.resolve("photo.png").writeBytes(byteArrayOf(0, 1, 3))
-        laptop.commitAndPush("laptop photo")
-        files.resolve("photo.png").writeBytes(byteArrayOf(0, 1, 4))
+        binaryConflict()
 
         assertEquals(SyncResult.Choose(listOf("photo.png")), sync())
         assertEquals(listOf<Byte>(0, 1, 4), files.resolve("photo.png").readBytes().toList())
@@ -263,12 +243,7 @@ abstract class SafeSyncContract(tempParent: File? = null, workTreeParent: File? 
 
     @Test
     fun keepsTheRemotesVersionWhenChosen() {
-        laptop.resolve("photo.png").writeBytes(byteArrayOf(0, 1, 2))
-        laptop.commitAndPush("photo")
-        sync()
-        laptop.resolve("photo.png").writeBytes(byteArrayOf(0, 1, 3))
-        laptop.commitAndPush("laptop photo")
-        files.resolve("photo.png").writeBytes(byteArrayOf(0, 1, 4))
+        binaryConflict()
         files.write("ideas.md", "kept too\n")
 
         assertEquals(SyncResult.Synced(pulled = 1, pushed = 1), sync(choices = mapOf("photo.png" to Keep.REMOTE)))
@@ -816,6 +791,24 @@ abstract class SafeSyncContract(tempParent: File? = null, workTreeParent: File? 
 
     private fun sync(git: Git = this.git, repo: Repo = phone, choices: Map<String, Keep> = emptyMap()) =
         SafeSync(git, Identity("Phone", "phone@example.com"), device = "Pixel", now = { 1000 }).sync(repo, choices = choices)
+
+    /** Both sides change the second line of notes.md; returns the remote's commit, which has the laptop's change. */
+    private fun conflictInNotes(): String {
+        laptop.write("notes.md", "one\nLAPTOP\nthree\n")
+        laptop.commitAndPush("laptop edit")
+        files.write("notes.md", "one\nPHONE\nthree\n")
+        return git.ok(remote, "rev-parse", "main")
+    }
+
+    /** Both sides change photo.png, synced before: to 0 1 3 on the laptop, 0 1 4 on the phone. */
+    private fun binaryConflict() {
+        laptop.resolve("photo.png").writeBytes(byteArrayOf(0, 1, 2))
+        laptop.commitAndPush("photo")
+        sync()
+        laptop.resolve("photo.png").writeBytes(byteArrayOf(0, 1, 3))
+        laptop.commitAndPush("laptop photo")
+        files.resolve("photo.png").writeBytes(byteArrayOf(0, 1, 4))
+    }
 
     private fun clone(name: String, from: File = remote) = temp.root.resolve(name).also {
         git.ok(temp.root, "clone", "-q", from.path, it.path)

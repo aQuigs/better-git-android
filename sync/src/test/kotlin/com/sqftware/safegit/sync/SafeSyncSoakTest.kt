@@ -176,7 +176,6 @@ class SafeSyncSoakTest {
             }
 
             val held = phone.holdsConflict()
-            val started = clock
             val result = try {
                 phone.sync(faulty)
             } catch (_: Killed) {
@@ -185,15 +184,16 @@ class SafeSyncSoakTest {
                 readOnly?.setWritable(true)
             }
             steps += "phone ${phone.name} syncs with $fault at call $at: ${result ?: "killed"}"
-            answer(phone, result, held, started, always = false)
+            answer(phone, result, held, always = false)
         }
 
         /** What the user does about a conflict: resolve the markers or choose a side, or, unless [always], leave it. */
-        private fun answer(phone: Phone, result: SyncResult?, held: Boolean, started: Long, always: Boolean) {
+        private fun answer(phone: Phone, result: SyncResult?, held: Boolean, always: Boolean) {
             when (result) {
                 is SyncResult.Conflict -> {
-                    // A held conflict reports what is left of one checked when it was made
-                    if (!held) phone.checkBothSidesChanged(result.paths, phone.backupSince(started) ?: return)
+                    // A held conflict reports what is left of one checked when it was made. A new one was made from the
+                    // branch last backed up, by this sync or by one killed before it could finish moving the folder
+                    if (!held) phone.checkBothSidesChanged(result.paths, phone.lastBackup())
                     if (always || random.nextBoolean()) phone.resolve(result.paths)
                 }
                 is SyncResult.Choose -> {
@@ -201,10 +201,9 @@ class SafeSyncSoakTest {
                     if (always || random.nextBoolean()) {
                         val choices = result.paths.associateWith { Keep.entries.random(random) }
                         phone.choosing(choices)
-                        val next = clock
                         val chosen = phone.sync(choices = choices)
                         steps += "phone ${phone.name} chooses $choices: $chosen"
-                        answer(phone, chosen, held = false, started = next, always)
+                        answer(phone, chosen, held = false, always)
                     }
                 }
                 else -> {}
@@ -216,10 +215,9 @@ class SafeSyncSoakTest {
             repeat(SETTLE_ROUNDS) {
                 val results = phones.map { phone ->
                     val held = phone.holdsConflict()
-                    val started = clock
                     phone.sync().also {
                         steps += "phone ${phone.name} settles: $it"
-                        answer(phone, it, held, started, always = true)
+                        answer(phone, it, held, always = true)
                     }
                 }
                 if (results.all { it == SyncResult.UpToDate }) {
@@ -246,9 +244,8 @@ class SafeSyncSoakTest {
             val missing = phoneLines.filter { (line, path) -> line !in removed && line !in files[path].orEmpty() }
             assertTrue("Lines the remote lost: $missing", missing.isEmpty())
 
-            val revisions = git.ok(remote, "rev-list", "--all").lines()
-            val markers = run(remote, "grep", "-E", "^(<<<<<<<|>>>>>>>)", *revisions.toTypedArray())
-            assertEquals("Conflict markers on the remote: ${markers.stdout}", 1, markers.exitCode)
+            val markers = git.ok(remote, "log", "--all", "--format=%H", "-G", "^(<<<<<<<|>>>>>>>)")
+            assertEquals("Commits with conflict markers on the remote", "", markers)
         }
 
         /** The id of every object in the history of any ref in [gitDir]. */
@@ -272,12 +269,10 @@ class SafeSyncSoakTest {
             fun sync(git: Git = this@SafeSyncSoakTest.git, choices: Map<String, Keep> = emptyMap()) =
                 SafeSync(git, identity, "Phone $name", now = { ++clock }).sync(repo, choices = choices)
 
-            fun holdsConflict() = repoGit.resolve("refs/safegit/conflict").let { it != null && it == repoGit.head() }
+            fun holdsConflict() = repoGit.resolve(HeldConflict.REF).let { it != null && it == repoGit.head() }
 
-            /** The branch as the sync that started at [started] found it, kept in the backup it made last. */
-            fun backupSince(started: Long) = gitOk("for-each-ref", "--format=%(refname)", "refs/safegit/backup/").lines()
-                .filter { it.isNotEmpty() && it.substringAfterLast("/").toLong() > started }
-                .maxByOrNull { it.substringAfterLast("/").toLong() }
+            fun lastBackup() = gitOk("for-each-ref", "--format=%(refname)", "refs/safegit/backup/").lines()
+                .maxBy { it.substringAfterLast("/").toLong() }
 
             fun gitOk(vararg args: String) = repoGit.check(*args).stdout.trim()
 
@@ -350,18 +345,18 @@ class SafeSyncSoakTest {
             /** Resolves each marked file by keeping one side or both, as a user editing it would. */
             fun resolve(paths: List<String>) {
                 for (path in paths.filter { folder.resolve(it).isFile }) {
-                    val keep = listOf(setOf(OURS), setOf(THEIRS), setOf(OURS, THEIRS)).random(random)
-                    var section: Int? = null
+                    val keep = listOf(setOf(Keep.LOCAL), setOf(Keep.REMOTE), Keep.entries.toSet()).random(random)
+                    var section: Keep? = null
                     val kept = folder.resolve(path).readText().removeSuffix("\n").split("\n").filter { line ->
                         when {
-                            line.startsWith("<<<<<<<") -> false.also { section = OURS }
-                            line == "=======" && section == OURS -> false.also { section = THEIRS }
+                            line.startsWith("<<<<<<<") -> false.also { section = Keep.LOCAL }
+                            line == "=======" && section == Keep.LOCAL -> false.also { section = Keep.REMOTE }
                             line.startsWith(">>>>>>>") -> false.also { section = null }
                             else -> section == null || section in keep
                         }
                     }
                     write(path, kept.joinToString("") { "$it\n" })
-                    steps += "phone $name resolves $path keeping ${if (keep.size == 2) "both" else if (OURS in keep) "its own" else "the remote's"}"
+                    steps += "phone $name resolves $path keeping $keep"
                 }
             }
 
@@ -417,8 +412,6 @@ class SafeSyncSoakTest {
         const val LINES = 4
         const val CALLS = 30
         const val SETTLE_ROUNDS = 10
-        const val OURS = 0
-        const val THEIRS = 1
         const val STEPS_SHOWN = 40
         // "plan" is a file or a folder, whichever a device makes first
         val NAMES = listOf("notes.md", "todo.md", "ideas.md", "log/today.md", "log/older.md", "plan", "plan/week.md")
