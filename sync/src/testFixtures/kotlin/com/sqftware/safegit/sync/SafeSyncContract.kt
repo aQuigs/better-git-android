@@ -1,7 +1,6 @@
 package com.sqftware.safegit.sync
 
 import com.sqftware.safegit.git.Git
-import com.sqftware.safegit.git.GitResult
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertThrows
@@ -282,7 +281,7 @@ abstract class SafeSyncContract(tempParent: File? = null, workTreeParent: File? 
         laptop.write("laptop.md", "from the laptop")
         laptop.commitAndPush("laptop work")
 
-        assertThrows(IllegalStateException::class.java) { sync(git.dyingAtTheLastStep()) }
+        assertThrows(Killed::class.java) { sync(git.dyingAtTheLastStep()) }
 
         assertEquals(SyncResult.UpToDate, sync())
         assertEquals("ONE\ntwo\nthree\n", files.read("notes.md"))
@@ -295,7 +294,7 @@ abstract class SafeSyncContract(tempParent: File? = null, workTreeParent: File? 
     fun anUpdateCutShortNeverOverwritesALaterEdit() {
         laptop.write("notes.md", "ONE\ntwo\nthree\n")
         laptop.commitAndPush("laptop work")
-        assertThrows(IllegalStateException::class.java) { sync(git.dyingAtTheLastStep()) }
+        assertThrows(Killed::class.java) { sync(git.dyingAtTheLastStep()) }
         files.write("notes.md", "ONE\ntwo\nTHREE\n")
 
         assertEquals(SyncResult.Synced(pulled = 1, pushed = 1), sync())
@@ -310,7 +309,7 @@ abstract class SafeSyncContract(tempParent: File? = null, workTreeParent: File? 
         laptop.write("notes.md", "ONE\ntwo\nthree\n")
         laptop.write("laptop.md", "from the laptop")
         laptop.commitAndPush("laptop work")
-        assertThrows(IllegalStateException::class.java) { sync(git.dyingAfterTheBranchMoved()) }
+        assertThrows(Killed::class.java) { sync(git.dyingAfterTheBranchMoved()) }
         files.write("notes.md", "ONE\ntwo\nTHREE\n")
 
         assertEquals(SyncResult.Synced(pulled = 0, pushed = 1), sync())
@@ -330,7 +329,7 @@ abstract class SafeSyncContract(tempParent: File? = null, workTreeParent: File? 
         laptop.write("z/z.md", "z, edited on the laptop")
         laptop.commitAndPush("laptop work")
         val head = phoneGit("rev-parse", "HEAD")
-        assertThrows(IllegalStateException::class.java) { sync(git.dyingAtTheLastStep()) }
+        assertThrows(Killed::class.java) { sync(git.dyingAtTheLastStep()) }
         // As if the killed sync had moved only a.md
         files.write("z/z.md", "z")
         val z = files.resolve("z")
@@ -389,6 +388,48 @@ abstract class SafeSyncContract(tempParent: File? = null, workTreeParent: File? 
     }
 
     @Test
+    fun mergesAnEditIntoAFileTheRemoteRenamedByCase() {
+        git.ok(laptop, "mv", "notes.md", "NOTES.md")
+        laptop.commitAndPush("rename")
+        files.write("notes.md", "rewritten\non the phone\n")
+
+        assertEquals(SyncResult.Synced(pulled = 1, pushed = 1), sync())
+
+        assertEquals(listOf("NOTES.md"), files.list()!!.toList())
+        assertEquals("rewritten\non the phone\n", laptop.also { laptopPull() }.read("NOTES.md"))
+    }
+
+    @Test
+    fun takesARenameByCaseWithAnEditWhenThePhoneChangedOtherFiles() {
+        git.ok(laptop, "mv", "notes.md", "NOTES.md")
+        laptop.write("NOTES.md", "rewritten\non the laptop\n")
+        laptop.commitAndPush("rename and rewrite")
+        files.write("ideas.md", "an idea\n")
+
+        assertEquals(SyncResult.Synced(pulled = 1, pushed = 1), sync())
+
+        assertEquals(listOf("NOTES.md", "ideas.md"), files.list()!!.sorted())
+        assertEquals("rewritten\non the laptop\n", files.read("NOTES.md"))
+    }
+
+    @Test
+    fun mergesAnEditIntoAFolderTheRemoteRenamedByCase() {
+        laptop.write("plan/week.md", "monday\n")
+        laptop.commitAndPush("plan")
+        assertEquals(SyncResult.Synced(pulled = 1, pushed = 0), sync())
+        // A case-insensitive disk cannot rename a folder by case in one step
+        git.ok(laptop, "mv", "plan", "plan-renaming")
+        git.ok(laptop, "mv", "plan-renaming", "Plan")
+        laptop.commitAndPush("rename the folder")
+        files.write("plan/week.md", "rewritten\non the phone\n")
+
+        assertEquals(SyncResult.Synced(pulled = 1, pushed = 1), sync())
+
+        assertEquals("rewritten\non the phone\n", laptop.also { laptopPull() }.read("Plan/week.md"))
+        assertEquals("", phoneGit("status", "--porcelain"))
+    }
+
+    @Test
     fun aRenameCutShortNeverLosesTheFile() {
         laptop.write("other.md", "a\nb\nc\n")
         laptop.commitAndPush("add other.md")
@@ -396,7 +437,7 @@ abstract class SafeSyncContract(tempParent: File? = null, workTreeParent: File? 
         git.ok(laptop, "mv", "notes.md", "Notes.md")
         laptop.write("other.md", "A\nb\nc\n")
         laptop.commitAndPush("rename, edit other.md")
-        assertThrows(IllegalStateException::class.java) { sync(git.dyingAtTheLastStep()) }
+        assertThrows(Killed::class.java) { sync(git.dyingAtTheLastStep()) }
         // An edit on top of the pulled version, which blocks finishing the update, so it goes back first
         files.write("other.md", "A\nb\nC\n")
 
@@ -481,11 +522,48 @@ abstract class SafeSyncContract(tempParent: File? = null, workTreeParent: File? 
     }
 
     @Test
+    fun aNameTheRemoteSpellsInAnotherCaseIsOneFile() {
+        files.write("todo.md", "from the phone\n")
+        git.ok(laptop, "update-index", "--add", "--cacheinfo", "100644,${blob("from the laptop\n")},TODO.md")
+        git.ok(laptop, "commit", "-q", "-m", "add TODO.md")
+        git.ok(laptop, "push", "-q", "origin", "HEAD:main")
+
+        val result = sync()
+
+        if (caseInsensitive) {
+            assertEquals(SyncResult.Conflict(listOf("TODO.md")), result)
+            files.write("todo.md", "from the laptop\n")
+            assertEquals(SyncResult.Synced(pulled = 1, pushed = 0), sync())
+            assertEquals(listOf("TODO.md", "notes.md"), files.list()!!.sorted())
+        } else {
+            assertEquals(SyncResult.Synced(pulled = 1, pushed = 1), result)
+            assertEquals("from the phone\n", files.read("todo.md"))
+        }
+    }
+
+    @Test
+    fun aFileAndAFolderNamedInAnotherCaseConflict() {
+        files.write("plan/week.md", "a folder on the phone")
+        git.ok(laptop, "update-index", "--add", "--cacheinfo", "100644,${blob("a file on the laptop")},PLAN")
+        git.ok(laptop, "commit", "-q", "-m", "add PLAN")
+        git.ok(laptop, "push", "-q", "origin", "HEAD:main")
+
+        val result = sync()
+
+        if (caseInsensitive) {
+            assertEquals(SyncResult.Conflict(listOf("PLAN", "plan/week.md")), result)
+            assertEquals("a folder on the phone", files.read("plan/week.md"))
+        } else {
+            assertEquals(SyncResult.Synced(pulled = 1, pushed = 1), result)
+        }
+    }
+
+    @Test
     fun aRenameCutShortKeepsALaterEdit() {
         git.ok(laptop, "mv", "notes.md", "Notes.md")
         laptop.write("Notes.md", "one\ntwo\nthree\nfour\n")
         laptop.commitAndPush("rename and edit")
-        assertThrows(IllegalStateException::class.java) { sync(git.dyingAtTheLastStep()) }
+        assertThrows(Killed::class.java) { sync(git.dyingAtTheLastStep()) }
         files.write("Notes.md", "edited on the phone\n")
 
         sync()
@@ -527,6 +605,22 @@ abstract class SafeSyncContract(tempParent: File? = null, workTreeParent: File? 
 
         assertEquals("now a file", files.read("plan"))
         assertEquals("a file where the phone has an empty folder", files.read("idea"))
+    }
+
+    @Test
+    fun replacesAFolderWithAFileNamedInAnotherCase() {
+        laptop.write("plan/week.md", "a folder")
+        laptop.commitAndPush("plan as a folder")
+        sync()
+        git.ok(laptop, "rm", "-q", "-r", "plan")
+        git.ok(laptop, "update-index", "--add", "--cacheinfo", "100644,${blob("now a file")},PLAN")
+        git.ok(laptop, "commit", "-q", "-m", "PLAN as a file")
+        git.ok(laptop, "push", "-q", "origin", "HEAD:main")
+
+        assertEquals(SyncResult.Synced(pulled = 1, pushed = 0), sync())
+
+        assertEquals("now a file", files.read("PLAN"))
+        assertEquals("", phoneGit("status", "--porcelain"))
     }
 
     @Test
@@ -592,17 +686,8 @@ abstract class SafeSyncContract(tempParent: File? = null, workTreeParent: File? 
         git.ok(temp.root, "clone", "-q", from.path, it.path)
     }
 
-    /** Clones the way the app does: the git dir in private storage, set for the case rules of the folder's storage. */
-    private fun splitClone(name: String, from: File = remote): Repo {
-        val repo = Repo(gitDir = temp.root.resolve("$name.git"), workTree = workTrees.root.resolve(name))
-        git.ok(temp.root, "clone", "-q", "--no-checkout", "--separate-git-dir", repo.gitDir.path, from.path, repo.workTree.path)
-        repo.workTree.resolve(".git").delete()
-        val probe = repo.workTree.resolve("CaseProbe").apply { writeText("") }
-        phoneGit(repo, "config", "core.ignorecase", repo.workTree.resolve("caseprobe").exists().toString())
-        probe.delete()
-        if (RepoGit(git, repo, LAPTOP).head() != null) phoneGit(repo, "checkout", "-q")
-        return repo
-    }
+    private fun splitClone(name: String, from: File = remote) =
+        git.splitClone(from, gitDir = temp.root.resolve("$name.git"), workTree = workTrees.root.resolve(name))
 
     private fun phoneGit(vararg args: String) = phoneGit(phone, *args)
 
@@ -626,51 +711,5 @@ abstract class SafeSyncContract(tempParent: File? = null, workTreeParent: File? 
     private fun blob(text: String): String {
         val file = temp.root.resolve("blob").apply { writeText(text) }
         return git.ok(laptop, "hash-object", "-w", file.path).also { file.delete() }
-    }
-
-    private fun Git.ok(dir: File, vararg args: String): String {
-        val result = run(dir, args.toList(), LAPTOP.environment)
-        assertTrue("git ${args.joinToString(" ")}: ${result.stderr}", result.ok)
-        return result.stdout.trim()
-    }
-
-    /** Runs [action] just before the first git command whose arguments match [command]. */
-    private fun Git.beforeFirst(command: (List<String>) -> Boolean, action: () -> Unit) =
-        onFirst({ args, _ -> command(args) }) {
-            action()
-            null
-        }
-
-    /**
-     * Calls [action] in place of the first git command that [command] matches by its arguments and input, running the
-     * command too unless the action returns a result of its own.
-     */
-    private fun Git.onFirst(command: (List<String>, String) -> Boolean, action: () -> GitResult?): Git {
-        val git = this
-        var done = false
-        return object : Git {
-            override fun run(dir: File, args: List<String>, environment: Map<String, String>, input: String): GitResult {
-                if (!done && command(args, input)) {
-                    done = true
-                    action()?.let { return it }
-                }
-                return git.run(dir, args, environment, input)
-            }
-        }
-    }
-
-    /** Stands in for Android killing the first git that [command] matches, as it does to child processes. */
-    private fun Git.killing(command: (List<String>) -> Boolean) =
-        onFirst({ args, _ -> command(args) }) { GitResult(exitCode = 137, stdout = "", stderr = "Killed") }
-
-    /** Stands in for the system killing the app after the folder moved, before the index and branch follow. */
-    private fun Git.dyingAtTheLastStep() = beforeFirst({ "--index-info" in it }) { error("killed") }
-
-    /** Stands in for the system killing the app after the branch moved, before the update's record is cleared. */
-    private fun Git.dyingAfterTheBranchMoved() =
-        onFirst({ args, input -> "update-ref" in args && input.startsWith("delete") }) { error("killed") }
-
-    private companion object {
-        val LAPTOP = Identity("Laptop", "laptop@example.com")
     }
 }

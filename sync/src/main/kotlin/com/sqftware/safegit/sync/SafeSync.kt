@@ -186,18 +186,28 @@ class SafeSync(
 
         /** Builds the commit that puts the local changes since [base] on top of [upstreamHead]. */
         private fun combine(upstreamHead: String, base: String): Combined {
+            val spelling = if (git.ignoreCase) RemoteSpelling(git, upstreamHead) else null
             val merge = git.probe(
-                "merge-tree", "--write-tree", "--name-only", "--no-messages", "-z", "--merge-base=$base", "HEAD", upstreamHead,
+                "merge-tree", "--write-tree", "--name-only", "--no-messages", "-z",
+                "--merge-base=${spelling?.of(base) ?: base}", spelling?.of("HEAD") ?: "HEAD", upstreamHead,
             )
             val lines = merge.stdout.paths()
             if (!merge.ok) {
                 return Combined.Conflict(lines.drop(1))
             }
+            val tree = lines.first()
             // Nothing local is left once the remote already has it all, e.g. after resolving to its version
-            if (lines.first() == git.resolve("$upstreamHead^{tree}")) {
+            if (tree == git.resolve("$upstreamHead^{tree}")) {
                 return Combined.Commit(upstreamHead)
             }
-            return Combined.Commit(git.check("commit-tree", lines.first(), "-p", upstreamHead, "-m", message).stdout.trim())
+            if (spelling != null) {
+                // Git sees no conflict in names that differ only by case; the remote's own are not the local changes' doing
+                val theirs = spelling.paths.toSet()
+                val clashes = caseClashes(git.check("ls-tree", "-r", "-z", "--name-only", tree).stdout.paths())
+                    .filter { group -> group.any { it !in theirs } }
+                if (clashes.isNotEmpty()) return Combined.Conflict(clashes.flatten().distinct().sorted())
+            }
+            return Combined.Commit(git.check("commit-tree", tree, "-p", upstreamHead, "-m", message).stdout.trim())
         }
     }
 

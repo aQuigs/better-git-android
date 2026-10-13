@@ -66,27 +66,17 @@ internal class FolderUpdate(private val git: RepoGit) {
 
     private enum class Side { FROM, TO }
 
-    private class Change(val path: String, val oldMode: String, val newMode: String, val newBlob: String) {
-        val old get() = isFile(oldMode)
-        val new get() = isFile(newMode)
-
-        // A submodule's files belong to its own repo, so on this side the path holds no file
-        private fun isFile(mode: String) = mode != ABSENT && mode != GITLINK
-    }
-
     private inner class Move(private val from: String, private val to: String) {
-        // Raw entries are ":<old mode> <new mode> <old blob> <new blob> <status>" then the path
-        private val entries = git.check("diff-tree", "-r", "-z", "--no-renames", from, to).stdout.paths().chunked(2)
-            .map { (entry, path) -> entry.removePrefix(":").split(" ").let { Change(path, it[0], it[1], it[3]) } }
+        private val entries = git.diff(from, to)
         private val changes = entries.filter { it.old || it.new }.associateBy { it.path }
         private val byCase = changes.keys.groupBy { it.lowercase() }
         private val listings = HashMap<File, MutableSet<String>>()
 
         fun run(resuming: Boolean): Result {
-            if (git.output("config", "--bool", "core.ignorecase") == "true") {
-                val twins = changes.values.filter { it.new }.groupBy { it.path.lowercase() }.values.filter { it.size > 1 }
-                if (twins.isNotEmpty()) {
-                    return undo(emptyList()) ?: Result.Blocked(twins.flatten().filter { !it.old }.ifEmpty { twins.flatten() }.map { it.path })
+            if (git.ignoreCase) {
+                val clashes = caseClashes(changes.values.filter { it.new }.map { it.path }).flatten().map(changes::getValue)
+                if (clashes.isNotEmpty()) {
+                    return undo(emptyList()) ?: Result.Blocked(clashes.filter { !it.old }.ifEmpty { clashes }.map { it.path }.distinct())
                 }
             }
 
@@ -115,14 +105,11 @@ internal class FolderUpdate(private val git: RepoGit) {
             // Git reads a submodule without its folder as deleted, so each gets the empty one clone would make
             for (change in entries) {
                 val folder = workTree.resolve(change.path)
-                if (change.newMode == GITLINK) folder.mkdirs() else if (change.oldMode == GITLINK && folder.isDirectory) folder.delete()
+                if (change.newMode == Change.GITLINK) folder.mkdirs() else if (change.oldMode == Change.GITLINK && folder.isDirectory) folder.delete()
             }
 
             // Only the changed entries move, so the index keeps every other file's cached stats and status stays fast
-            val index = entries.joinToString("") {
-                if (it.newMode == ABSENT) "0 ${"0".repeat(it.newBlob.length)}\t${it.path}\u0000" else "${it.newMode} ${it.newBlob}\t${it.path}\u0000"
-            }
-            git.check("update-index", "-z", "--index-info", input = index)
+            git.check("update-index", "-z", "--index-info", input = entries.joinToString("") { indexEntry(it.newMode, it.newBlob, it.path) })
             git.check("update-ref", "HEAD", to)
             finish()
             return Result.Done
@@ -183,7 +170,7 @@ internal class FolderUpdate(private val git: RepoGit) {
                 return when {
                     attributes == null -> true
                     // Each file in it is the update's to move, and its own check decides whether it holds that side
-                    attributes.isDirectory -> current.toFile().walk().all { it.isDirectory || it.relativeTo(workTree).invariantSeparatorsPath in changes }
+                    attributes.isDirectory -> current.toFile().walk().all { it.isDirectory || isChanged(it) }
                     else -> renames && opensRenamedFile(path)
                 }
             }
@@ -192,6 +179,15 @@ internal class FolderUpdate(private val git: RepoGit) {
                 return attributes.isSymbolicLink && Files.readSymbolicLink(current) == Files.readSymbolicLink(expected)
             }
             return attributes.isRegularFile && attributes.size() == Files.size(expected) && sameBytes(current, expected)
+        }
+
+        /** Whether [file] is one the update moves, under any name that opens it. */
+        private fun isChanged(file: File): Boolean {
+            val path = file.relativeTo(workTree).invariantSeparatorsPath
+            return path in changes || byCase[path.lowercase()].orEmpty().any { other ->
+                val known = workTree.resolve(other).toPath()
+                Files.exists(known, NOFOLLOW_LINKS) && Files.isSameFile(known, file.toPath())
+            }
         }
 
         /** Whether [path] opens the same file as the other half of a rename that changes only case. */
@@ -290,8 +286,6 @@ internal class FolderUpdate(private val git: RepoGit) {
     private companion object {
         const val FROM = "refs/safegit/move-from"
         const val TO = "refs/safegit/move-to"
-        const val ABSENT = "000000"
-        const val GITLINK = "160000"
         const val CHUNK = 64 * 1024
     }
 }
