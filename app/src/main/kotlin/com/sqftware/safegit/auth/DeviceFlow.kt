@@ -9,15 +9,20 @@ import java.net.URLEncoder
 /** A GitHub account the app syncs as. */
 data class Account(val login: String, val id: Long, val name: String?)
 
-/** What the user enters at [verificationUri], and what the app polls with until they have. */
-data class DeviceCode(val userCode: String, val verificationUri: String, val deviceCode: String, val interval: Int)
+/** What the user enters at [verificationUri], and what the app polls with every [interval] seconds until they have. */
+data class DeviceCode(val userCode: String, val verificationUri: String, val deviceCode: String, val interval: Int, val expiresIn: Int)
 
 /** How a poll for the token went. */
 sealed interface Poll {
-    /** Not yet; ask again in [interval] seconds. */
-    data class Wait(val interval: Int) : Poll
+    /** Not yet. */
+    data object Pending : Poll
 
-    data class Granted(val token: String) : Poll
+    /** Not yet, and polling too often: wait [interval] seconds from now on. */
+    data class SlowDown(val interval: Int) : Poll
+
+    class Granted(val token: String) : Poll {
+        override fun toString() = "Granted"
+    }
 
     /** The user declined, or the code expired. */
     data class Ended(val reason: String) : Poll
@@ -34,7 +39,7 @@ interface DeviceFlow {
 
 /**
  * GitHub's OAuth device flow, which needs only the OAuth app's public client id, no secret and no backend. Every call
- * blocks on the network and throws [IOException] when it fails.
+ * blocks on the network and throws [IOException] when it fails, or a JSONException for an answer it cannot read.
  */
 class GitHubDeviceFlow(
     private val clientId: String,
@@ -43,7 +48,13 @@ class GitHubDeviceFlow(
 ) : DeviceFlow {
     override fun start(): DeviceCode {
         val json = post("$web/login/device/code", "client_id" to clientId, "scope" to "repo")
-        return DeviceCode(json.getString("user_code"), json.getString("verification_uri"), json.getString("device_code"), json.optInt("interval", 5))
+        return DeviceCode(
+            json.getString("user_code"),
+            json.getString("verification_uri"),
+            json.getString("device_code"),
+            json.optInt("interval", 5),
+            json.optInt("expires_in", 900),
+        )
     }
 
     override fun poll(code: DeviceCode): Poll {
@@ -55,9 +66,8 @@ class GitHubDeviceFlow(
         )
         if (json.has("access_token")) return Poll.Granted(json.getString("access_token"))
         return when (val error = json.optString("error")) {
-            "authorization_pending" -> Poll.Wait(code.interval)
-            // GitHub asks for a longer wait each time, and says how long
-            "slow_down" -> Poll.Wait(json.optInt("interval", code.interval + 5))
+            "authorization_pending" -> Poll.Pending
+            "slow_down" -> Poll.SlowDown(json.optInt("interval", code.interval + 5))
             else -> Poll.Ended(json.optString("error_description", error))
         }
     }

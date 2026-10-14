@@ -43,6 +43,7 @@ fun AccountCard(
                 is SignIn.State.Waiting -> {
                     Text(stringResource(R.string.account_enter_code))
                     Text(state.code.userCode, style = MaterialTheme.typography.headlineMedium, fontFamily = FontFamily.Monospace)
+                    Text(state.code.verificationUri, style = MaterialTheme.typography.bodySmall)
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                         Button(onClick = { onOpen(state.code) }) { Text(stringResource(R.string.account_open)) }
                         TextButton(onClick = onCancel) { Text(stringResource(R.string.cancel)) }

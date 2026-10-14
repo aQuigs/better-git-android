@@ -19,7 +19,7 @@ class AccountCardTest {
 
     @Test
     fun showsTheCodeToEnterOnGitHub() {
-        val code = DeviceCode("WDJB-MJHT", "https://github.com/login/device", "dev123", 5)
+        val code = DeviceCode("WDJB-MJHT", "https://github.com/login/device", "dev123", 5, 900)
         val opened = mutableListOf<DeviceCode>()
         compose.setContent { AccountCard(SignIn.State.Waiting(code), onSignIn = {}, onOpen = { opened += it }, onCancel = {}, onSignOut = {}) }
 

@@ -16,7 +16,7 @@ Git Sync (ViscousPot/GitSync, Flutter + libgit2) loses work: its pull merges and
 - **Tests:** `SafeSyncContract` (in `sync`'s test fixtures) holds the sync rules. It runs against desktop git on the JVM and against the bundled git on the emulator, since a newer git can change behavior. On the emulator it runs twice: in app storage, and with the folder on shared storage (`SharedStorageSafeSyncTest`), which is case-insensitive and behind FUSE like a real vault. CI's Linux is case-sensitive, so only a Mac or the emulator runs the case rules. `SafeSyncSoakTest` plays two phones and a laptop at random with crashes and failed writes injected. It checks that no version a phone's user wrote is ever gone, that conflicts come only from files both sides changed, and that the remote ends with every line nobody removed on purpose. A long run (`-Dsoak.seeds=40`) is the check before trusting a sync change.
 - **Engine boundary:** sync logic talks to a `Git` interface in plain Kotlin, and the CLI runner is one implementation of it.
 - **Storage:** repos live in shared storage (e.g. an Obsidian vault in `Documents/`) under the All-files access permission (`MANAGE_EXTERNAL_STORAGE`), declared as core functionality on Play. SAF cannot back git (no paths, lstat or locking). To keep object and index I/O off the slow FUSE layer, the repo's git dir sits in app-private storage and points at the shared worktree, with `core.untrackedCache` on. On the emulator with the notes repo (about 2,800 files), this split layout brings `status` from 36 ms to 9 ms, and committing 20 edits from 0.4–0.65 s to 0.14 s, compared with the whole repo in shared storage.
-- **Auth:** ease of use first. GitHub sign-in uses the OAuth device flow, which needs no client secret or backend. The token lives in the Android Keystore and reaches git through `GIT_CONFIG_COUNT`/`http.extraHeader`, never argv or a config file. HTTPS only to start; SSH (a bundled ssh client) comes later if needed.
+- **Auth:** ease of use first. GitHub sign-in uses the OAuth device flow, which needs no client secret or backend; the OAuth app's public client id is `safegit.githubClientId` in `gradle.properties`. The token is encrypted under an Android Keystore key and reaches git as an `http.https://github.com/.extraHeader` through `GIT_CONFIG_COUNT`, never argv or a config file. Commits carry the account's name and noreply email. HTTPS only to start; SSH (a bundled ssh client) comes later if needed.
 - **Connecting a folder:** `RepoSetup` makes the private git dir and sets the folder storage's rules (`core.ignorecase`, `core.symlinks` probed there; no file mode). A folder with a `.git` of its own (as Git Sync leaves) starts from that repo's commit, but only when it is at rest, not sparse, and on the same remote branch; otherwise connecting is refused, since the first sync would push markers, deletions or another repo's files.
 - **Sync is manual:** a button, nothing in the background yet. A sync takes seconds, so it runs as expedited WorkManager work, not a foreground service.
 
@@ -50,6 +50,7 @@ Git Sync (ViscousPot/GitSync, Flutter + libgit2) loses work: its pull merges and
 - **Dropped commits:** commits the remote dropped with a force push leave the phone's branch too (kept in the backup ref). The UI should say so.
 - **Backup refs** are never pruned yet.
 - **Cancellation:** `CliGit` cannot stop a running git yet. When sync becomes cancellable, kill git cleanly. A sync removes an `index.lock` it finds at the start, which is safe only while syncs of a repo never overlap: `SyncWorker` holds a per-repo lock on the thread running git, since a stopped worker's git runs on while WorkManager starts the work again.
+- **Revoked token:** a token revoked on GitHub still shows as signed in, and its header makes every github.com fetch fail, public repos too. The sync shows the failure; the UI should say to sign in again.
 - **Play review:** the All-files access declaration could be rejected.
 - **FUSE:** the first `add` of a whole vault is slow (4 s for the notes repo, split layout). Measure on a real phone too.
 
@@ -77,6 +78,7 @@ sync/src/main/kotlin/com/sqftware/safegit/
 └── sync/                # SafeSync (one sync: commit, fetch, merge, move the folder, push), FolderUpdate, RepoSetup
 app/src/main/kotlin/com/sqftware/safegit/
 ├── MainActivity.kt      # all-files access, then the repo list or the add screen
+├── auth/                # GitHub device-flow sign-in, and the token in the Keystore
 ├── Services.kt          # the app's singletons: repo store, sync records, bundled git
 ├── git/BundledGit.kt    # sets up the git binaries shipped as native libraries
 ├── repos/               # the connected repos, saved as JSON, and Connector, which adds one

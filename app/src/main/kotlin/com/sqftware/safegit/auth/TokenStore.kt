@@ -10,4 +10,6 @@ interface TokenStore {
 }
 
 /** An account signed in, with the token git sends for it. */
-data class Session(val account: Account, val token: String)
+data class Session(val account: Account, val token: String) {
+    override fun toString() = "Session(${account.login})"
+}

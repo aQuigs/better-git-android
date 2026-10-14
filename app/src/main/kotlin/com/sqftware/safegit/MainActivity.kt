@@ -1,5 +1,6 @@
 package com.sqftware.safegit
 
+import android.content.ActivityNotFoundException
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
@@ -107,10 +108,13 @@ private fun Repos(services: Services, onAdd: () -> Unit) {
     )
 }
 
-/** Copies the code for pasting on GitHub's page, and opens it. */
+/** Copies the code for pasting on GitHub's page, and opens it; the card shows the address for a phone with no browser. */
 private fun openCode(context: Context, code: DeviceCode) {
     context.getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText(code.userCode, code.userCode))
-    context.startActivity(Intent(Intent.ACTION_VIEW, code.verificationUri.toUri()))
+    try {
+        context.startActivity(Intent(Intent.ACTION_VIEW, code.verificationUri.toUri()))
+    } catch (_: ActivityNotFoundException) {
+    }
 }
 
 @Composable

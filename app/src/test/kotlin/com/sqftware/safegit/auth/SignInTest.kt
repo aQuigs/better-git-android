@@ -1,21 +1,26 @@
 package com.sqftware.safegit.auth
 
 import com.sqftware.safegit.sync.Credentials
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.IOException
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 
 class SignInTest {
     private val octo = Account("octo", 42, "Octo Cat")
-    private val code = DeviceCode("WDJB-MJHT", "https://github.com/login/device", "dev123", 5)
+    private val code = DeviceCode("WDJB-MJHT", "https://github.com/login/device", "dev123", 5, 900)
     private val store = MemoryStore()
 
     @Test
     fun signsInAndSyncsAsTheAccount() = runBlocking {
-        val signIn = signIn(FakeFlow(Poll.Wait(5), Poll.Granted("tok")))
+        val signIn = signIn(FakeFlow(Poll.Pending, IOException("dropped"), Poll.SlowDown(10), Poll.Granted("tok")))
         settle(signIn)
 
         signIn.signIn()
@@ -60,6 +65,42 @@ class SignInTest {
     }
 
     @Test
+    fun aGrantLandingAfterCancelIsDropped() = runBlocking {
+        // The poll is a blocking network call that cancelling cannot stop, so it returns after the user cancelled
+        val release = CountDownLatch(1)
+        val accountRead = CountDownLatch(1)
+        val flow = object : DeviceFlow {
+            override fun start() = code
+
+            override fun poll(code: DeviceCode): Poll {
+                release.await()
+                return Poll.Granted("tok")
+            }
+
+            override fun account(token: String) = octo.also { accountRead.countDown() }
+        }
+        val signIn = SignIn(flow, store, CoroutineScope(Dispatchers.IO), wait = {})
+        settle(signIn)
+        signIn.signIn()
+        signIn.state.first { it is SignIn.State.Waiting }
+
+        signIn.cancel()
+        release.countDown()
+        assertTrue(accountRead.await(5, TimeUnit.SECONDS))
+        delay(300)
+
+        assertEquals(SignIn.State.SignedOut, signIn.state.value)
+        assertEquals(null, store.session)
+    }
+
+    @Test
+    fun commitsUnderTheLoginWhenTheNameIsNoName() = runBlocking {
+        store.session = Session(octo.copy(name = "\"';"), "tok")
+
+        assertEquals("octo", signIn(FakeFlow()).identity("Pixel").name)
+    }
+
+    @Test
     fun aBuildWithoutAClientIdCannotSignIn() = runBlocking {
         assertEquals(SignIn.State.Unavailable, settle(SignIn(null, store, this)))
     }
@@ -68,12 +109,17 @@ class SignInTest {
 
     private suspend fun settle(signIn: SignIn) = signIn.state.first { it != SignIn.State.Loading }
 
-    private inner class FakeFlow(vararg polls: Poll) : DeviceFlow {
+    /** Answers each poll with the next of [polls], throwing the exceptions among them. */
+    private inner class FakeFlow(vararg polls: Any) : DeviceFlow {
         private val polls = ArrayDeque(polls.toList())
 
         override fun start() = code
 
-        override fun poll(code: DeviceCode) = polls.removeFirstOrNull() ?: throw IOException("no more polls")
+        override fun poll(code: DeviceCode): Poll = when (val next = polls.removeFirstOrNull()) {
+            is Poll -> next
+            is Exception -> throw next
+            else -> throw AssertionError("polled too often")
+        }
 
         override fun account(token: String) = octo
     }

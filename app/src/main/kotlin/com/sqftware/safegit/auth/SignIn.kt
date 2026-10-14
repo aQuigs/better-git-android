@@ -3,6 +3,7 @@ package com.sqftware.safegit.auth
 import com.sqftware.safegit.sync.Credentials
 import com.sqftware.safegit.sync.Identity
 import com.sqftware.safegit.sync.TokenCredentials
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -44,6 +45,7 @@ class SignIn(
     val state: StateFlow<State> = current
 
     private var job: Job? = null
+    private var attempt = 0
 
     private var session: Session? = null
     private var read = false
@@ -56,49 +58,88 @@ class SignIn(
     fun credentials(): Credentials = session()?.let { TokenCredentials(GITHUB, it.token) } ?: Credentials.NONE
 
     /** Who commits: the account by its private GitHub email, or the app on [device] before sign-in. */
-    fun identity(device: String): Identity = session()?.account?.let { Identity(it.name ?: it.login, "${it.id}+${it.login}@users.noreply.github.com") }
-        ?: Identity("SafeGit on $device", "safegit@users.noreply.github.com")
+    fun identity(device: String): Identity = session()?.account?.let {
+        // Git refuses a name with no letters or digits, such as one that is all punctuation
+        val name = it.name?.takeIf { name -> name.any(Char::isLetterOrDigit) } ?: it.login
+        Identity(name, "${it.id}+${it.login}@users.noreply.github.com")
+    } ?: Identity("SafeGit on $device", "safegit@users.noreply.github.com")
 
     @Synchronized
     fun signIn() {
         val flow = flow ?: return
         if (current.value == State.Starting || current.value is State.Waiting) return
+        val mine = ++attempt
         current.value = State.Starting
-        job = scope.launch { current.value = signedIn(flow) }
+        job = scope.launch {
+            val outcome = try {
+                Result.success(session(flow, mine))
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Result.failure(e)
+            }
+            finish(mine, outcome)
+        }
     }
 
+    /** Stops a sign-in still waiting for the user; one that already got its token is kept. */
     @Synchronized
     fun cancel() {
+        if (current.value != State.Starting && current.value !is State.Waiting) return
+        attempt++
         job?.cancel()
         current.value = signedOut()
     }
 
     @Synchronized
     fun signOut() {
+        attempt++
+        job?.cancel()
         store.clear()
         remember(null)
         current.value = signedOut()
     }
 
-    private suspend fun signedIn(flow: DeviceFlow): State = try {
+    private suspend fun session(flow: DeviceFlow, mine: Int): Session {
         val code = flow.start()
-        current.value = State.Waiting(code)
+        show(mine, State.Waiting(code))
+        val deadline = System.currentTimeMillis() + code.expiresIn * 1000L
         var interval = code.interval
-        var granted: String? = null
-        while (granted == null) {
+        while (true) {
             wait(interval)
-            when (val poll = flow.poll(code)) {
-                is Poll.Wait -> interval = poll.interval
-                is Poll.Granted -> granted = poll.token
-                is Poll.Ended -> return State.Failed(poll.reason)
+            // The user may be minutes in the browser, so a dropped connection meanwhile only costs a poll
+            val poll = try {
+                flow.poll(code)
+            } catch (e: IOException) {
+                if (System.currentTimeMillis() > deadline) throw e
+                continue
+            }
+            when (poll) {
+                Poll.Pending -> Unit
+                is Poll.SlowDown -> interval = poll.interval
+                is Poll.Granted -> return Session(flow.account(poll.token), poll.token)
+                is Poll.Ended -> throw Ended(poll.reason)
             }
         }
-        val signedIn = Session(flow.account(granted), granted)
-        store.save(signedIn)
-        remember(signedIn)
-        State.SignedIn(signedIn.account)
-    } catch (e: IOException) {
-        State.Failed(e.message ?: e.toString())
+    }
+
+    // A sign-in cancelled or overtaken by another must not touch the state, since git's network calls cannot be stopped
+    @Synchronized
+    private fun show(mine: Int, state: State) {
+        if (mine == attempt) current.value = state
+    }
+
+    @Synchronized
+    private fun finish(mine: Int, outcome: Result<Session>) {
+        if (mine != attempt) return
+        current.value = try {
+            val session = outcome.getOrThrow()
+            store.save(session)
+            remember(session)
+            State.SignedIn(session.account)
+        } catch (e: Exception) {
+            State.Failed(e.message ?: e.toString())
+        }
     }
 
     @Synchronized
@@ -114,6 +155,8 @@ class SignIn(
     }
 
     private fun signedOut() = if (flow == null) State.Unavailable else State.SignedOut
+
+    private class Ended(reason: String) : Exception(reason)
 
     private companion object {
         const val GITHUB = "https://github.com/"

@@ -36,10 +36,10 @@ class GitHubDeviceFlowTest {
         polls += """{"access_token":"tok","token_type":"bearer","scope":"repo"}"""
 
         val code = flow.start()
-        assertEquals(DeviceCode("WDJB-MJHT", "https://github.com/login/device", "dev123", 5), code)
-        assertEquals(Poll.Wait(5), flow.poll(code))
-        assertEquals(Poll.Wait(10), flow.poll(code))
-        assertEquals(Poll.Granted("tok"), flow.poll(code))
+        assertEquals(DeviceCode("WDJB-MJHT", "https://github.com/login/device", "dev123", 5, 900), code)
+        assertEquals(Poll.Pending, flow.poll(code))
+        assertEquals(Poll.SlowDown(10), flow.poll(code))
+        assertEquals("tok", (flow.poll(code) as Poll.Granted).token)
         assertEquals(Account("octo", 42, null), flow.account("tok"))
 
         assertEquals(mapOf("client_id" to "client1", "scope" to "repo"), forms.first())

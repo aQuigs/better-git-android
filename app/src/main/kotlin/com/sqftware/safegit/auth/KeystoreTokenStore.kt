@@ -3,10 +3,8 @@ package com.sqftware.safegit.auth
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import com.sqftware.safegit.storage.writeAtomically
-import org.json.JSONException
 import org.json.JSONObject
 import java.io.File
-import java.security.GeneralSecurityException
 import java.security.KeyStore
 import java.util.Base64
 import javax.crypto.Cipher
@@ -28,10 +26,9 @@ class KeystoreTokenStore(private val file: File) : TokenStore {
             cipher.init(Cipher.DECRYPT_MODE, key(), GCMParameterSpec(128, decode(json.getString("iv"))))
             val token = String(cipher.doFinal(decode(json.getString("token"))))
             Session(Account(json.getString("login"), json.getLong("id"), json.optString("name").takeIf { !json.isNull("name") }), token)
-        } catch (_: GeneralSecurityException) {
-            // The key is gone, as after the app's data was partly cleared: the user signs in again
-            null
-        } catch (_: JSONException) {
+        } catch (_: Exception) {
+            // The key is gone, as after the app's data was partly cleared, or the file is damaged: the user signs in
+            // again, rather than the app failing at every start
             null
         }
     }
