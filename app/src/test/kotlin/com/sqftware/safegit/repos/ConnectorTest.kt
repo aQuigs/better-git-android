@@ -2,6 +2,7 @@ package com.sqftware.safegit.repos
 
 import com.sqftware.safegit.git.CliGit
 import com.sqftware.safegit.sync.Choice
+import com.sqftware.safegit.sync.Credentials
 import com.sqftware.safegit.sync.Identity
 import com.sqftware.safegit.sync.Keep
 import com.sqftware.safegit.sync.Problem
@@ -86,7 +87,7 @@ class ConnectorTest {
     }
 
     private suspend fun CoroutineScope.connect(url: String, folder: File): Connector.State {
-        val connector = Connector({ git }, Identity("Phone", "phone@example.com"), repos, syncer, { gitDirs.resolve("$it.git") }, this)
+        val connector = Connector({ git }, Identity("Phone", "phone@example.com"), { Credentials.NONE }, repos, syncer, { gitDirs.resolve("$it.git") }, this)
         connector.connect(url, folder)
         return connector.state.first { it != Connector.State.Connecting }
     }

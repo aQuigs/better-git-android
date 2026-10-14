@@ -2,6 +2,9 @@ package com.sqftware.safegit
 
 import android.content.Context
 import android.os.Build
+import com.sqftware.safegit.auth.GitHubDeviceFlow
+import com.sqftware.safegit.auth.KeystoreTokenStore
+import com.sqftware.safegit.auth.SignIn
 import com.sqftware.safegit.git.BundledGit
 import com.sqftware.safegit.git.Git
 import com.sqftware.safegit.repos.Connector
@@ -25,7 +28,6 @@ class Services private constructor(context: Context) {
     /** Installing rewrites git's links, so it happens once per process, on first use off the main thread. */
     val git: Git by lazy { BundledGit(context).install() }
     val device: String = Build.MODEL
-    val identity = Identity("SafeGit on $device", "safegit@users.noreply.github.com")
 
     // Kept out of backups: a git dir can be large, and the remote has it all
     private val gitDirs = context.noBackupFilesDir.resolve("repos")
@@ -33,8 +35,16 @@ class Services private constructor(context: Context) {
     // For work that outlives the screen that started it
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
+    // A build without a client id (see app/build.gradle.kts) syncs public repos only
+    val signIn = SignIn(
+        context.getString(R.string.github_client_id).takeIf { it.isNotEmpty() }?.let(::GitHubDeviceFlow),
+        KeystoreTokenStore(context.filesDir.resolve("github.json")),
+        scope,
+    )
     val syncer: Syncer = WorkSyncer(context, repos, records, scope)
-    val connector = Connector({ git }, identity, repos, syncer, ::gitDir, scope)
+
+    // Connecting commits nothing, so who it runs as never shows
+    val connector = Connector({ git }, Identity("SafeGit", "safegit@users.noreply.github.com"), signIn::credentials, repos, syncer, ::gitDir, scope)
 
     fun repo(saved: SavedRepo) = Repo(gitDir(saved.id), saved.folder)
 

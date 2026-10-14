@@ -19,6 +19,9 @@ android {
         ndk {
             abiFilters += "arm64-v8a"
         }
+
+        // The GitHub OAuth app's client id is public, as the device flow is built for apps that cannot keep a secret
+        resValue("string", "github_client_id", providers.gradleProperty("safegit.githubClientId").getOrElse(""))
     }
 
     compileOptions {
@@ -28,6 +31,7 @@ android {
 
     buildFeatures {
         compose = true
+        resValues = true
     }
 
     packaging {
