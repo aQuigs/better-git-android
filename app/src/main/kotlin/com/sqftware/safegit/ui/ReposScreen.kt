@@ -2,6 +2,7 @@ package com.sqftware.safegit.ui
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -28,7 +29,6 @@ import com.sqftware.safegit.R
 import com.sqftware.safegit.repos.SavedRepo
 import com.sqftware.safegit.sync.Choice
 import com.sqftware.safegit.sync.Keep
-import com.sqftware.safegit.sync.Problem
 import com.sqftware.safegit.sync.SyncResult
 import com.sqftware.safegit.work.SyncState
 
@@ -46,7 +46,7 @@ fun ReposScreen(rows: List<RepoRow>, onSync: (SavedRepo, Map<Choice, Keep>) -> U
             }
             return@Scaffold
         }
-        LazyColumn(Modifier.fillMaxSize().padding(padding), contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp)) {
+        LazyColumn(Modifier.fillMaxSize().padding(padding), contentPadding = PaddingValues(16.dp)) {
             items(rows, key = { it.repo.id }) { row ->
                 RepoCard(row, onSync = { choices -> onSync(row.repo, choices) })
             }
@@ -61,39 +61,37 @@ private fun RepoCard(row: RepoRow, onSync: (Map<Choice, Keep>) -> Unit) {
             Text(row.repo.name, style = MaterialTheme.typography.titleMedium)
             Text(row.repo.url, style = MaterialTheme.typography.bodySmall)
 
-            val state = row.state
-            val result = (state as? SyncState.Finished)?.result
-            when {
-                state == null -> Text(stringResource(R.string.state_never))
-                state is SyncState.Running -> {
+            when (val state = row.state) {
+                null -> Text(stringResource(R.string.state_never))
+                SyncState.Running -> {
                     Text(stringResource(R.string.state_running))
                     LinearProgressIndicator(Modifier.fillMaxWidth())
                 }
-                result is SyncResult.Choose -> Choices(result.choices, onSync)
-                result != null -> Outcome(result)
+                is SyncState.Finished -> Outcome(state.result, onSync)
             }
 
-            if (result !is SyncResult.Choose) {
-                Button(onClick = { onSync(emptyMap()) }, enabled = state !is SyncState.Running) { Text(stringResource(R.string.sync)) }
+            // A choice syncs with its own button
+            val choosing = (row.state as? SyncState.Finished)?.result is SyncResult.Choose
+            if (!choosing) {
+                Button(onClick = { onSync(emptyMap()) }, enabled = row.state != SyncState.Running) { Text(stringResource(R.string.sync)) }
             }
         }
     }
 }
 
 @Composable
-private fun Outcome(result: SyncResult) {
+private fun Outcome(result: SyncResult, onSync: (Map<Choice, Keep>) -> Unit) {
     when (result) {
         SyncResult.UpToDate -> Text(stringResource(R.string.state_up_to_date))
         is SyncResult.Synced -> Text(stringResource(R.string.state_synced))
         is SyncResult.Conflict -> {
             Text(stringResource(R.string.state_conflict))
-            Paths(result.paths)
+            Column {
+                for (path in result.paths) Text(path, fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodyMedium)
+            }
         }
-        is SyncResult.Failed -> {
-            Text(stringResource(problemText(result.problem)), color = MaterialTheme.colorScheme.error)
-            if (result.detail.isNotEmpty()) Text(result.detail, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace)
-        }
-        is SyncResult.Choose -> Unit
+        is SyncResult.Choose -> Choices(result.choices, onSync)
+        is SyncResult.Failed -> Failure(result.problem, result.detail)
     }
 }
 
@@ -105,10 +103,7 @@ private fun Choices(choices: List<Choice>, onSync: (Map<Choice, Keep>) -> Unit) 
     for (choice in choices) {
         Column {
             Text(choice.path, fontFamily = FontFamily.Monospace)
-            Text(
-                stringResource(R.string.choice_sides, side(choice.local), side(choice.remote)),
-                style = MaterialTheme.typography.bodySmall,
-            )
+            Text(sides(choice), style = MaterialTheme.typography.bodySmall)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                 FilterChip(kept[choice] == Keep.LOCAL, onClick = { kept[choice] = Keep.LOCAL }, label = { Text(stringResource(R.string.keep_local)) })
                 FilterChip(kept[choice] == Keep.REMOTE, onClick = { kept[choice] = Keep.REMOTE }, label = { Text(stringResource(R.string.keep_remote)) })
@@ -119,23 +114,10 @@ private fun Choices(choices: List<Choice>, onSync: (Map<Choice, Keep>) -> Unit) 
 }
 
 @Composable
-private fun side(objectId: String?) = stringResource(if (objectId == null) R.string.side_none else R.string.side_file)
+private fun sides(choice: Choice) = when {
+    choice.local != null && choice.remote != null -> stringResource(R.string.choice_both)
+    else -> stringResource(R.string.choice_sides, side(choice.local), side(choice.remote))
+}
 
 @Composable
-private fun Paths(paths: List<String>) {
-    Column {
-        for (path in paths) Text(path, fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodyMedium)
-    }
-}
-
-private fun problemText(problem: Problem) = when (problem) {
-    Problem.NOT_ON_BRANCH -> R.string.problem_not_on_branch
-    Problem.NO_UPSTREAM -> R.string.problem_no_upstream
-    Problem.FETCH -> R.string.problem_fetch
-    Problem.PUSH -> R.string.problem_push
-    Problem.REMOTE_KEPT_CHANGING -> R.string.problem_remote_kept_changing
-    Problem.FOLDER_KEPT_CHANGING -> R.string.problem_folder_kept_changing
-    Problem.FOLDER_BLOCKED -> R.string.problem_folder_blocked
-    Problem.FOLDER_WRITE -> R.string.problem_folder_write
-    Problem.GIT -> R.string.problem_git
-}
+private fun side(objectId: String?) = stringResource(if (objectId == null) R.string.side_none else R.string.side_file)

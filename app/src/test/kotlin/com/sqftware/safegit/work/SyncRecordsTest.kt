@@ -1,18 +1,20 @@
 package com.sqftware.safegit.work
 
-import androidx.test.ext.junit.runners.AndroidJUnit4
-import com.sqftware.safegit.git.TestDevice
 import com.sqftware.safegit.sync.Choice
 import com.sqftware.safegit.sync.Keep
 import com.sqftware.safegit.sync.Problem
 import com.sqftware.safegit.sync.SyncResult
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
+import org.junit.Rule
 import org.junit.Test
-import org.junit.runner.RunWith
+import org.junit.rules.TemporaryFolder
 
-@RunWith(AndroidJUnit4::class)
 class SyncRecordsTest {
-    private val records = SyncRecords(TestDevice.context.cacheDir.resolve("records-test").apply { deleteRecursively() })
+    @get:Rule
+    val temp = TemporaryFolder()
+
+    private val records by lazy { SyncRecords(temp.root.resolve("syncs")) }
 
     @Test
     fun keepsEachKindOfResult() {
@@ -36,5 +38,15 @@ class SyncRecordsTest {
 
         assertEquals(choices, records.takeChoices("repo"))
         assertEquals(emptyMap<Choice, Keep>(), records.takeChoices("repo"))
+    }
+
+    @Test
+    fun readsAResultItCannotParseAsNone() {
+        temp.root.resolve("syncs").mkdirs()
+        temp.root.resolve("syncs/repo.result.json").writeText("")
+        assertNull(records.result("repo"))
+
+        temp.root.resolve("syncs/repo.result.json").writeText("""{"type":"failed","problem":"RENAMED","detail":""}""")
+        assertNull(records.result("repo"))
     }
 }

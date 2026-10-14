@@ -31,11 +31,11 @@ class AllFilesAccess(private val context: Context) : StorageAccess {
 
 /**
  * The path of a folder the system folder picker returned, which names it as "<volume>:<path>"; null for one that is not
- * on local storage. With all-files access the app reads it by path, not through the picker's grant.
+ * a folder on local storage. With all-files access the app reads it by path, not through the picker's grant.
  */
 fun folderOf(tree: Uri): File? {
     if (tree.authority != "com.android.externalstorage.documents") return null
     val (volume, path) = DocumentsContract.getTreeDocumentId(tree).split(":", limit = 2).let { it[0] to it.getOrElse(1) { "" } }
     val root = if (volume == "primary") Environment.getExternalStorageDirectory() else File("/storage/$volume")
-    return root.resolve(path)
+    return root.resolve(path).takeIf { it.isDirectory }
 }

@@ -81,13 +81,15 @@ dependencies {
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.compose.ui)
     implementation(libs.androidx.compose.material3)
-    // Runs each sync as unique, expedited work, so two syncs of a repo never overlap and one outlives the screen
+    // Runs each sync as expedited work that outlives the screen
     implementation(libs.androidx.work.runtime)
 
     // Declares the empty ComponentActivity that Compose UI tests render a single composable into
     debugImplementation(libs.androidx.compose.ui.test.manifest)
 
     testImplementation(libs.junit)
+    // The real org.json, in place of android.jar's stubs, so the app's JSON files are tested on the JVM
+    testImplementation(libs.json)
 
     androidTestImplementation(testFixtures(project(":sync")))
     androidTestImplementation(platform(libs.androidx.compose.bom))

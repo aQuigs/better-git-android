@@ -2,6 +2,7 @@ package com.sqftware.safegit
 
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -11,34 +12,27 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
+import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.res.stringResource
-import com.sqftware.safegit.repos.SavedRepo
+import com.sqftware.safegit.repos.Connector
 import com.sqftware.safegit.storage.AllFilesAccess
+import com.sqftware.safegit.storage.StorageAccess
 import com.sqftware.safegit.storage.folderOf
-import com.sqftware.safegit.sync.Credentials
-import com.sqftware.safegit.sync.RepoSetup
 import com.sqftware.safegit.ui.AccessScreen
 import com.sqftware.safegit.ui.AddRepoScreen
 import com.sqftware.safegit.ui.RepoRow
 import com.sqftware.safegit.ui.ReposScreen
-import com.sqftware.safegit.work.Syncer
-import com.sqftware.safegit.work.WorkSyncer
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import java.io.File
-import java.util.UUID
 
 class MainActivity : ComponentActivity() {
-    private val access by lazy { AllFilesAccess(this) }
+    private val access: StorageAccess by lazy { AllFilesAccess(this) }
     private var granted by mutableStateOf(false)
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -46,13 +40,12 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
 
         val services = Services.of(this)
-        val syncer = WorkSyncer(this)
         setContent {
             MaterialTheme(colorScheme = colors()) {
                 if (!granted) {
                     AccessScreen(onGrant = access::request)
                 } else {
-                    App(services, syncer)
+                    App(services)
                 }
             }
         }
@@ -66,58 +59,60 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-private fun App(services: Services, syncer: Syncer) {
-    var repos by remember { mutableStateOf(services.repos.all()) }
-    var adding by remember { mutableStateOf(false) }
-    val states by syncer.states.collectAsState(emptyMap())
+private fun App(services: Services) {
+    var adding by rememberSaveable { mutableStateOf(false) }
+    val connecting by services.connector.state.collectAsState()
 
-    if (!adding) {
-        ReposScreen(
-            rows = repos.map { RepoRow(it, states[it.id]) },
-            onSync = syncer::sync,
-            onAdd = { adding = true },
-        )
-        return
-    }
-
-    var folder by remember { mutableStateOf<File?>(null) }
-    var connecting by remember { mutableStateOf(false) }
-    var error by remember { mutableStateOf<String?>(null) }
-    val unusable = stringResource(R.string.add_folder_unusable)
-    val pick = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { tree ->
-        if (tree != null) {
-            folder = folderOf(tree)
-            error = if (folder == null) unusable else null
+    // Also when the user left the add screen while it connected
+    LaunchedEffect(connecting) {
+        if (connecting is Connector.State.Connected) {
+            services.connector.reset()
+            adding = false
         }
     }
-    val scope = rememberCoroutineScope()
+
+    if (adding) {
+        AddRepo(services.connector, connecting, onDone = { adding = false })
+    } else {
+        Repos(services, onAdd = { adding = true })
+    }
+}
+
+@Composable
+private fun Repos(services: Services, onAdd: () -> Unit) {
+    val repos by services.repos.all.collectAsState(null)
+    val states by services.syncer.states.collectAsState(emptyMap())
+    ReposScreen(
+        rows = repos?.map { RepoRow(it, states[it.id]) } ?: return,
+        onSync = services.syncer::sync,
+        onAdd = onAdd,
+    )
+}
+
+@Composable
+private fun AddRepo(connector: Connector, state: Connector.State, onDone: () -> Unit) {
+    var folder by rememberSaveable { mutableStateOf<String?>(null) }
+    var unusable by rememberSaveable { mutableStateOf(false) }
+    val pick = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { tree ->
+        if (tree != null) {
+            folder = folderOf(tree)?.path
+            unusable = folder == null
+            connector.reset()
+        }
+    }
+    val cancel = {
+        connector.reset()
+        onDone()
+    }
+    BackHandler(enabled = state != Connector.State.Connecting, onBack = cancel)
+
     AddRepoScreen(
-        folder = folder,
-        connecting = connecting,
-        error = error,
+        folder = folder?.let(::File),
+        folderUnusable = unusable,
+        state = state,
         onPickFolder = { pick.launch(null) },
-        onConnect = { url ->
-            val chosen = folder ?: return@AddRepoScreen
-            connecting = true
-            scope.launch {
-                val id = UUID.randomUUID().toString()
-                val result = withContext(Dispatchers.IO) {
-                    RepoSetup(services.git, services.identity).connect(url, services.gitDir(id), chosen, Credentials.NONE)
-                }
-                connecting = false
-                when (result) {
-                    is RepoSetup.Result.Connected -> {
-                        val saved = SavedRepo(id, url, chosen)
-                        services.repos.save(saved)
-                        repos = services.repos.all()
-                        adding = false
-                        syncer.sync(saved)
-                    }
-                    is RepoSetup.Result.Failed -> error = result.detail.ifEmpty { result.problem.name }
-                }
-            }
-        },
-        onCancel = { adding = false },
+        onConnect = { url -> folder?.let { connector.connect(url, File(it)) } },
+        onCancel = cancel,
     )
 }
 
@@ -128,5 +123,5 @@ private fun colors() = when {
         if (isSystemInDarkTheme()) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
     }
     isSystemInDarkTheme() -> darkColorScheme()
-    else -> MaterialTheme.colorScheme
+    else -> lightColorScheme()
 }

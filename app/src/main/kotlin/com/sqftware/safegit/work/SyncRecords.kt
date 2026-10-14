@@ -1,44 +1,57 @@
 package com.sqftware.safegit.work
 
+import com.sqftware.safegit.storage.objects
+import com.sqftware.safegit.storage.stringOrNull
+import com.sqftware.safegit.storage.strings
+import com.sqftware.safegit.storage.writeAtomically
 import com.sqftware.safegit.sync.Choice
 import com.sqftware.safegit.sync.Keep
 import com.sqftware.safegit.sync.Problem
 import com.sqftware.safegit.sync.SyncResult
 import org.json.JSONArray
+import org.json.JSONException
 import org.json.JSONObject
 import java.io.File
 
 /**
  * Each repo's last sync result and the choices for its next one, kept in files: WorkManager's own data is capped at
- * 10 KB, which a long list of conflicted paths can pass.
+ * 10 KB, which a long list of conflicted paths can pass. Every call blocks on file I/O.
  */
 class SyncRecords(private val dir: File) {
-    fun result(id: String): SyncResult? = read(id, "result")?.let { decode(JSONObject(it)) }
-
-    fun saveResult(id: String, result: SyncResult) = write(id, "result", encode(result).toString())
-
-    fun saveChoices(id: String, choices: Map<Choice, Keep>) = write(
-        id,
-        "choices",
-        JSONArray(choices.map { (choice, keep) -> encode(choice).put("keep", keep.name) }).toString(),
-    )
-
-    /** The choices saved for the next sync, which uses them once. */
-    fun takeChoices(id: String): Map<Choice, Keep> {
-        val text = read(id, "choices") ?: return emptyMap()
-        dir.resolve("$id.choices.json").delete()
-        val array = JSONArray(text)
-        return (0 until array.length()).map { array.getJSONObject(it) }.associate { decodeChoice(it) to Keep.valueOf(it.getString("keep")) }
+    /** The last result, or null when there is none or this version cannot read it. */
+    fun result(id: String): SyncResult? {
+        val file = file(id, RESULT).takeIf { it.exists() } ?: return null
+        return try {
+            decode(JSONObject(file.readText()))
+        } catch (_: JSONException) {
+            null
+        } catch (_: IllegalArgumentException) {
+            null
+        }
     }
-
-    private fun read(id: String, kind: String) = dir.resolve("$id.$kind.json").takeIf { it.exists() }?.readText()
 
     @Synchronized
-    private fun write(id: String, kind: String, text: String) {
-        dir.mkdirs()
-        val next = dir.resolve("$id.$kind.json.new").apply { writeText(text) }
-        check(next.renameTo(dir.resolve("$id.$kind.json"))) { "Could not save $kind for $id" }
+    fun saveResult(id: String, result: SyncResult) = file(id, RESULT).writeAtomically(encode(result).toString())
+
+    @Synchronized
+    fun saveChoices(id: String, choices: Map<Choice, Keep>) {
+        if (choices.isEmpty()) {
+            file(id, CHOICES).delete()
+            return
+        }
+        file(id, CHOICES).writeAtomically(JSONArray(choices.map { (choice, keep) -> encode(choice).put("keep", keep.name) }).toString())
     }
+
+    /** The choices saved for the next sync, which uses them once. */
+    @Synchronized
+    fun takeChoices(id: String): Map<Choice, Keep> {
+        val file = file(id, CHOICES).takeIf { it.exists() } ?: return emptyMap()
+        val array = JSONArray(file.readText())
+        file.delete()
+        return array.objects().associate { decodeChoice(it) to Keep.valueOf(it.getString("keep")) }
+    }
+
+    private fun file(id: String, kind: String) = dir.resolve("$id.$kind.json")
 
     private fun encode(result: SyncResult): JSONObject = when (result) {
         SyncResult.UpToDate -> JSONObject().put("type", "upToDate")
@@ -48,21 +61,22 @@ class SyncRecords(private val dir: File) {
         is SyncResult.Failed -> JSONObject().put("type", "failed").put("problem", result.problem.name).put("detail", result.detail)
     }
 
-    private fun decode(json: JSONObject): SyncResult = when (json.getString("type")) {
+    private fun decode(json: JSONObject): SyncResult = when (val type = json.getString("type")) {
         "upToDate" -> SyncResult.UpToDate
         "synced" -> SyncResult.Synced(json.getInt("pulled"), json.getInt("pushed"))
         "conflict" -> SyncResult.Conflict(json.getJSONArray("paths").strings())
-        "choose" -> json.getJSONArray("choices").let { array ->
-            SyncResult.Choose((0 until array.length()).map { decodeChoice(array.getJSONObject(it)) })
-        }
-        else -> SyncResult.Failed(Problem.valueOf(json.getString("problem")), json.getString("detail"))
+        "choose" -> SyncResult.Choose(json.getJSONArray("choices").objects().map(::decodeChoice))
+        "failed" -> SyncResult.Failed(Problem.valueOf(json.getString("problem")), json.getString("detail"))
+        else -> throw IllegalArgumentException("Unknown sync result $type")
     }
 
     private fun encode(choice: Choice) = JSONObject().put("path", choice.path)
         .put("local", choice.local ?: JSONObject.NULL).put("remote", choice.remote ?: JSONObject.NULL)
 
-    private fun decodeChoice(json: JSONObject) =
-        Choice(json.getString("path"), json.optString("local").takeIf { !json.isNull("local") }, json.optString("remote").takeIf { !json.isNull("remote") })
+    private fun decodeChoice(json: JSONObject) = Choice(json.getString("path"), json.stringOrNull("local"), json.stringOrNull("remote"))
 
-    private fun JSONArray.strings() = (0 until length()).map(::getString)
+    private companion object {
+        const val RESULT = "result"
+        const val CHOICES = "choices"
+    }
 }

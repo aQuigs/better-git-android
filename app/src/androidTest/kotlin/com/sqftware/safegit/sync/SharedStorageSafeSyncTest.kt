@@ -13,8 +13,6 @@ class SharedStorageSafeSyncTest : SafeSyncContract(TestDevice.context.cacheDir, 
 
     @Test
     fun runsOnCaseInsensitiveStorage() {
-        val probe = workTrees.newFile("CaseProbe")
-        assertTrue(workTrees.root.resolve("caseprobe").exists())
-        probe.delete()
+        assertTrue(ignoresCase(workTrees.root))
     }
 }

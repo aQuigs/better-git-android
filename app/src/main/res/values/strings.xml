@@ -19,6 +19,7 @@
     <string name="state_choose">These changes can\'t be combined in one file. Choose which version to keep; nothing has changed yet.</string>
     <string name="side_file">has it</string>
     <string name="side_none">deleted it</string>
+    <string name="choice_both">Changed on this phone and on the remote</string>
     <string name="choice_sides">This phone %1$s, the remote %2$s</string>
     <string name="keep_local">Keep this phone\'s</string>
     <string name="keep_remote">Keep the remote\'s</string>
@@ -31,6 +32,7 @@
     <string name="problem_folder_kept_changing">Files kept changing during the sync. Try again.</string>
     <string name="problem_folder_blocked">These files are in the way, and SafeGit won\'t overwrite them:</string>
     <string name="problem_folder_write">Couldn\'t write the folder; it was left as it was.</string>
+    <string name="problem_folder_repo">The folder has a git repo of its own that SafeGit can\'t start from.</string>
     <string name="problem_git">Git stopped unexpectedly.</string>
 
     <string name="add_title">Add a repo</string>
@@ -41,6 +43,8 @@
     <string name="add_folder_explain">An empty folder gets the repo\'s files. A folder that already has notes keeps them, and they merge with the repo\'s on the first sync.</string>
     <string name="add_connect">Connect</string>
     <string name="add_connecting">Connecting…</string>
+    <string name="add_password_in_url">Leave the password or token out of the URL. Sign-in comes separately.</string>
+    <string name="add_folder_overlaps">This folder is, holds or sits inside a folder that is already connected.</string>
     <string name="add_folder_unusable">Choose a folder on this phone\'s storage.</string>
     <string name="cancel">Cancel</string>
 </resources>

@@ -4,12 +4,18 @@ import android.content.Context
 import android.os.Build
 import com.sqftware.safegit.git.BundledGit
 import com.sqftware.safegit.git.Git
+import com.sqftware.safegit.repos.Connector
 import com.sqftware.safegit.repos.FileRepoStore
 import com.sqftware.safegit.repos.RepoStore
 import com.sqftware.safegit.repos.SavedRepo
 import com.sqftware.safegit.sync.Identity
 import com.sqftware.safegit.sync.Repo
 import com.sqftware.safegit.work.SyncRecords
+import com.sqftware.safegit.work.Syncer
+import com.sqftware.safegit.work.WorkSyncer
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 
 /** What the app's parts share, built once per process. */
 class Services private constructor(context: Context) {
@@ -24,9 +30,15 @@ class Services private constructor(context: Context) {
     // Kept out of backups: a git dir can be large, and the remote has it all
     private val gitDirs = context.noBackupFilesDir.resolve("repos")
 
+    // For work that outlives the screen that started it
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    val syncer: Syncer = WorkSyncer(context, repos, records, scope)
+    val connector = Connector({ git }, identity, repos, syncer, ::gitDir, scope)
+
     fun repo(saved: SavedRepo) = Repo(gitDir(saved.id), saved.folder)
 
-    fun gitDir(id: String) = gitDirs.resolve("$id.git")
+    private fun gitDir(id: String) = gitDirs.resolve("$id.git")
 
     companion object {
         @Volatile

@@ -11,6 +11,7 @@ import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import androidx.work.workDataOf
 import com.sqftware.safegit.Services
+import com.sqftware.safegit.repos.RepoStore
 import com.sqftware.safegit.repos.SavedRepo
 import com.sqftware.safegit.sync.Choice
 import com.sqftware.safegit.sync.Credentials
@@ -18,10 +19,16 @@ import com.sqftware.safegit.sync.Keep
 import com.sqftware.safegit.sync.Problem
 import com.sqftware.safegit.sync.SafeSync
 import com.sqftware.safegit.sync.SyncResult
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.util.concurrent.ConcurrentHashMap
 
 /** Where a repo's sync stands: running, or the last one's result. */
 sealed interface SyncState {
@@ -39,30 +46,32 @@ interface Syncer {
 }
 
 /**
- * Runs each sync as WorkManager work, unique per repo, so two syncs of one repo never overlap, and expedited, since it
- * takes seconds and the user is waiting.
+ * Runs each sync as WorkManager work, unique per repo, and expedited, since it takes seconds and the user is waiting.
  */
-class WorkSyncer(context: Context) : Syncer {
+class WorkSyncer(context: Context, repos: RepoStore, private val records: SyncRecords, private val scope: CoroutineScope) : Syncer {
     private val work = WorkManager.getInstance(context)
-    private val records = Services.of(context).records
 
-    override val states: Flow<Map<String, SyncState>> = work.getWorkInfosByTagFlow(TAG).map { infos ->
+    // WorkManager only says what is running: it prunes finished work after a day, and the records keep every result
+    override val states: Flow<Map<String, SyncState>> = combine(repos.all, work.getWorkInfosByTagFlow(TAG)) { saved, infos ->
         val running = infos.filter { !it.state.isFinished }.mapNotNull { it.repoId }.toSet()
-        val known = infos.mapNotNull { it.repoId }.toSet()
-        known.associateWith { id -> if (id in running) SyncState.Running else records.result(id)?.let(SyncState::Finished) }
-            .filterValues { it != null }.mapValues { it.value!! }
-    }
+        saved.mapNotNull { repo ->
+            val state = if (repo.id in running) SyncState.Running else records.result(repo.id)?.let(SyncState::Finished)
+            state?.let { repo.id to it }
+        }.toMap()
+    }.distinctUntilChanged().flowOn(Dispatchers.IO)
 
     override fun sync(repo: SavedRepo, choices: Map<Choice, Keep>) {
-        records.saveChoices(repo.id, choices)
-        val request = OneTimeWorkRequestBuilder<SyncWorker>()
-            .addTag(TAG)
-            .addTag("$REPO_TAG${repo.id}")
-            .setInputData(workDataOf(SyncWorker.REPO to repo.id))
-            // Before Android 12, expedited work runs as a foreground service, which needs a notification of its own
-            .apply { if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) setExpedited(OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST) }
-            .build()
-        work.enqueueUniqueWork("sync-${repo.id}", ExistingWorkPolicy.KEEP, request)
+        scope.launch(Dispatchers.IO) {
+            records.saveChoices(repo.id, choices)
+            val request = OneTimeWorkRequestBuilder<SyncWorker>()
+                .addTag(TAG)
+                .addTag("$REPO_TAG${repo.id}")
+                .setInputData(workDataOf(SyncWorker.REPO to repo.id))
+                // Before Android 12, expedited work runs as a foreground service, which needs a notification of its own
+                .apply { if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) setExpedited(OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST) }
+                .build()
+            work.enqueueUniqueWork("sync-${repo.id}", ExistingWorkPolicy.KEEP, request)
+        }
     }
 
     private val WorkInfo.repoId get() = tags.firstOrNull { it.startsWith(REPO_TAG) }?.removePrefix(REPO_TAG)
@@ -74,25 +83,27 @@ class WorkSyncer(context: Context) : Syncer {
 }
 
 class SyncWorker(context: Context, params: WorkerParameters) : CoroutineWorker(context, params) {
-    override suspend fun doWork(): Result {
+    override suspend fun doWork(): Result = withContext(Dispatchers.IO) {
         val services = Services.of(applicationContext)
-        val id = inputData.getString(REPO) ?: return Result.failure()
-        val saved = services.repos.all().find { it.id == id } ?: return Result.failure()
+        val id = inputData.getString(REPO) ?: return@withContext Result.failure()
+        val saved = services.repos.all.first().find { it.id == id } ?: return@withContext Result.failure()
 
-        val result = withContext(Dispatchers.IO) {
-            try {
-                SafeSync(services.git, services.identity, services.device)
-                    .sync(services.repo(saved), Credentials.NONE, services.records.takeChoices(id))
+        // Unique work is not enough: a stopped worker's sync runs on, since git cannot be cancelled, while WorkManager
+        // starts the same work again. The lock is held by the thread running git, so the rerun waits for it.
+        synchronized(locks.computeIfAbsent(id) { Any() }) {
+            val result = try {
+                SafeSync(services.git, services.identity, services.device).sync(services.repo(saved), Credentials.NONE, services.records.takeChoices(id))
             } catch (e: Exception) {
                 // Shown like any other failure rather than leaving the last result up as if nothing had happened
                 SyncResult.Failed(Problem.GIT, e.toString())
             }
+            services.records.saveResult(id, result)
         }
-        services.records.saveResult(id, result)
-        return Result.success()
+        Result.success()
     }
 
     companion object {
         const val REPO = "repo"
+        private val locks = ConcurrentHashMap<String, Any>()
     }
 }

@@ -23,14 +23,16 @@ internal class RepoGit(private val git: Git, val repo: Repo, private val identit
 
     /** Runs a command that must succeed. */
     fun check(vararg args: String, environment: Map<String, String> = emptyMap(), input: String = ""): GitResult =
-        run(*args, environment = environment, input = input).also { if (!it.ok) throw GitFailure(args.first(), it) }
+        run(*args, environment = environment, input = input).also { if (!it.ok) throw GitFailure(command(args), it) }
 
     /**
      * Runs a command whose exit code 1 is an answer, "no" or "none", as `diff --quiet`, `rev-parse --verify --quiet`,
      * `merge-base` and `merge-tree` use it.
      */
     fun probe(vararg args: String): GitResult =
-        run(*args).also { if (it.exitCode !in 0..NO) throw GitFailure(args.first { !it.startsWith("-") && "=" !in it }, it) }
+        run(*args).also { if (it.exitCode !in 0..NO) throw GitFailure(command(args), it) }
+
+    private fun command(args: Array<out String>) = args.first { !it.startsWith("-") && "=" !in it }
 
     /** The output of a [probe] that answered yes, or null. */
     fun output(vararg args: String) = probe(*args).takeIf { it.ok }?.stdout?.trim()

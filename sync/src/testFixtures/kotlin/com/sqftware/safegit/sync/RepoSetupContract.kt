@@ -60,10 +60,7 @@ abstract class RepoSetupContract(tempParent: File? = null, workTreeParent: File?
     fun setsTheCaseRulesOfTheFoldersStorage() {
         val repo = connect()
 
-        val probe = folder.resolve("CaseProbe").apply { writeText("") }
-        val ignoresCase = folder.resolve("caseprobe").exists()
-        probe.delete()
-        assertEquals(ignoresCase.toString(), RepoGit(git, repo, LAPTOP).check("config", "core.ignorecase").stdout.trim())
+        assertEquals(ignoresCase(folder).toString(), RepoGit(git, repo, LAPTOP).check("config", "core.ignorecase").stdout.trim())
         assertTrue(folder.list()!!.isEmpty())
     }
 
@@ -95,6 +92,77 @@ abstract class RepoSetupContract(tempParent: File? = null, workTreeParent: File?
     }
 
     @Test
+    fun refusesAFolderRepoStoppedMidRebase() {
+        // How Git Sync leaves a conflicting pull: git's own markers in the file, and a commit not yet replayed
+        git.ok(temp.root, "clone", "-q", remote.path, folder.path)
+        folder.resolve("notes.md").writeText("one\nPHONE\nthree\n")
+        git.ok(folder, "commit", "-q", "-am", "phone edit")
+        laptop.resolve("notes.md").writeText("one\nLAPTOP\nthree\n")
+        laptop.commitAndPush("laptop edit")
+        assertFalse(git.run(folder, listOf("pull", "-q", "--rebase"), LAPTOP.environment).ok)
+
+        assertRefused()
+    }
+
+    @Test
+    fun refusesAFolderRepoStoppedMidMerge() {
+        git.ok(temp.root, "clone", "-q", remote.path, folder.path)
+        folder.resolve("notes.md").writeText("one\nPHONE\nthree\n")
+        git.ok(folder, "commit", "-q", "-am", "phone edit")
+        laptop.resolve("notes.md").writeText("one\nLAPTOP\nthree\n")
+        laptop.commitAndPush("laptop edit")
+        assertFalse(git.run(folder, listOf("pull", "-q", "--no-rebase"), LAPTOP.environment).ok)
+
+        assertRefused()
+    }
+
+    @Test
+    fun refusesAFolderRepoOfAnotherRemote() {
+        val other = temp.newFolder("other.git")
+        git.ok(other, "init", "-q", "--bare", "-b", "trunk")
+        git.ok(temp.root, "clone", "-q", other.path, folder.path)
+        folder.resolve("private.md").writeText("not for this remote\n")
+        git.ok(folder, "add", "--all")
+        git.ok(folder, "commit", "-q", "-m", "private")
+
+        assertRefused()
+    }
+
+    @Test
+    fun refusesAFolderRepoOnAnotherBranch() {
+        git.ok(temp.root, "clone", "-q", remote.path, folder.path)
+        git.ok(folder, "checkout", "-q", "-b", "drafts")
+
+        assertRefused()
+    }
+
+    @Test
+    fun refusesASparseFolderRepo() {
+        git.ok(temp.root, "clone", "-q", remote.path, folder.path)
+        git.ok(folder, "update-index", "--skip-worktree", "notes.md")
+        folder.resolve("notes.md").delete()
+
+        assertRefused()
+    }
+
+    @Test
+    fun keepsWhatTheFolderRepoExcludes() {
+        git.ok(temp.root, "clone", "-q", remote.path, folder.path)
+        folder.resolve(".git/info/exclude").apply { parentFile.mkdirs() }.writeText("private.md\n")
+        folder.resolve("private.md").writeText("only on the phone\n")
+
+        assertEquals(SyncResult.UpToDate, sync(connect()))
+        assertTrue(folder.resolve("private.md").exists())
+    }
+
+    @Test
+    fun neverSyncsAProbeFileLeftBehind() {
+        folder.resolve(".safegit-probe123.tmp").writeText("")
+
+        assertEquals(SyncResult.Synced(pulled = 1, pushed = 0), sync(connect()))
+    }
+
+    @Test
     fun leavesNothingBehindWhenTheRemoteCannotBeReached() {
         val result = RepoSetup(git, LAPTOP).connect(temp.root.resolve("missing.git").path, gitDir, folder)
 
@@ -102,9 +170,19 @@ abstract class RepoSetupContract(tempParent: File? = null, workTreeParent: File?
         assertFalse(gitDir.exists())
     }
 
+    private fun assertRefused() {
+        val before = git.ok(folder, "status", "--porcelain")
+
+        val result = RepoSetup(git, LAPTOP).connect(remote.path, gitDir, folder)
+
+        assertEquals(Problem.FOLDER_REPO, (result as RepoSetup.Result.Failed).problem)
+        assertFalse(gitDir.exists())
+        assertEquals(before, git.ok(folder, "status", "--porcelain"))
+    }
+
     private fun connect() = (RepoSetup(git, LAPTOP).connect(remote.path, gitDir, folder) as RepoSetup.Result.Connected).repo
 
-    private fun sync(repo: Repo) = SafeSync(git, Identity("Phone", "phone@example.com"), device = "Pixel").sync(repo)
+    private fun sync(repo: Repo) = SafeSync(git, PHONE, device = "Pixel").sync(repo)
 
     private fun File.commitAndPush(message: String) {
         git.ok(this, "add", "--all")

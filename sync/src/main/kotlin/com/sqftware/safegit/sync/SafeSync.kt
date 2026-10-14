@@ -70,6 +70,9 @@ enum class Problem {
 
     /** Writing the folder failed, e.g. storage full; it was left as it was, or the next sync finishes the job. */
     FOLDER_WRITE,
+
+    /** The folder has a git repo of its own that is no safe place to start from; the detail says why. */
+    FOLDER_REPO,
     GIT,
 }
 

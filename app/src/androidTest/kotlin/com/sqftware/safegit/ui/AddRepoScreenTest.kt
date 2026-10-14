@@ -6,6 +6,7 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import com.sqftware.safegit.repos.Connector
 import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
@@ -21,7 +22,7 @@ class AddRepoScreenTest {
     fun connectsOnceItHasAUrlAndAFolder() {
         val connected = mutableListOf<String>()
         compose.setContent {
-            AddRepoScreen(File("/storage/emulated/0/Documents/notes"), connecting = false, error = null, onPickFolder = {}, onConnect = { connected += it }, onCancel = {})
+            AddRepoScreen(File("/storage/emulated/0/Documents/notes"), folderUnusable = false, Connector.State.Idle, onPickFolder = {}, onConnect = { connected += it }, onCancel = {})
         }
 
         compose.onNodeWithText("Connect").assertIsNotEnabled()
@@ -33,11 +34,20 @@ class AddRepoScreenTest {
 
     @Test
     fun needsAFolder() {
-        compose.setContent { AddRepoScreen(null, connecting = false, error = null, onPickFolder = {}, onConnect = {}, onCancel = {}) }
+        compose.setContent { AddRepoScreen(null, folderUnusable = false, Connector.State.Idle, onPickFolder = {}, onConnect = {}, onCancel = {}) }
 
         compose.onNodeWithText("Repo URL").performTextInput("https://github.com/me/notes.git")
 
         compose.onNodeWithText("Connect").assertIsNotEnabled()
         compose.onNodeWithText("No folder chosen").assertExists()
+    }
+
+    @Test
+    fun saysWhyItWasRefused() {
+        compose.setContent {
+            AddRepoScreen(File("/storage/emulated/0/Documents/notes"), folderUnusable = false, Connector.State.Refused(Connector.Refusal.FOLDER_OVERLAPS), {}, {}, {})
+        }
+
+        compose.onNodeWithText("This folder is, holds or sits inside a folder that is already connected.").assertExists()
     }
 }
