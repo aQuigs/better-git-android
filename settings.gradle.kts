@@ -15,4 +15,4 @@ dependencyResolutionManagement {
 }
 
 rootProject.name = "better-git-android"
-include(":app")
+include(":app", ":sync")
