@@ -10,6 +10,7 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.sqftware.safegit.repos.SavedRepo
 import com.sqftware.safegit.sync.Choice
 import com.sqftware.safegit.sync.Keep
+import com.sqftware.safegit.sync.Problem
 import com.sqftware.safegit.sync.Step
 import com.sqftware.safegit.sync.SyncResult
 import com.sqftware.safegit.work.SyncState
@@ -60,6 +61,16 @@ class ReposScreenTest {
 
         compose.onNodeWithText("daily/today.md").assertExists()
         compose.onNodeWithText("ideas.md").assertExists()
+        compose.onNodeWithText("Sync").assertIsEnabled()
+    }
+
+    @Test
+    fun saysWhichSubmodulesWereLeftAsTheyWere() {
+        val left = SyncState.Finished(SyncResult.Failed(Problem.SUBMODULE, "lib: It is not on a branch."))
+        compose.setContent { ReposScreen(listOf(RepoRow(vault, left)), onSync = { _, _ -> }, onAdd = {}) }
+
+        compose.onNodeWithText("The rest synced, but SafeGit left these submodules as they were:").assertExists()
+        compose.onNodeWithText("lib: It is not on a branch.").assertExists()
         compose.onNodeWithText("Sync").assertIsEnabled()
     }
 

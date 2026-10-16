@@ -25,5 +25,6 @@ private fun problemText(problem: Problem) = when (problem) {
     Problem.FOLDER_BLOCKED -> R.string.problem_folder_blocked
     Problem.FOLDER_WRITE -> R.string.problem_folder_write
     Problem.FOLDER_REPO -> R.string.problem_folder_repo
+    Problem.SUBMODULE -> R.string.problem_submodule
     Problem.GIT -> R.string.problem_git
 }

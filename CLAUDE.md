@@ -39,7 +39,15 @@ Git Sync (ViscousPot/GitSync, Flutter + libgit2) loses work: its pull merges and
    - A folder in the way of a file is cleared only once it holds no files.
    - On case-insensitive storage, a folder holds one file under either spelling of its name. So before merging, every path the remote spells in another case, by its file or a folder name, takes the remote's spelling, in the local side and the merge base alike (respelling one side alone makes git guess the rename from contents). Two files, or a file and a folder, that the local changes leave differing only by case are reported as a conflict.
 5. `push` without force. If the remote moved in the meantime, repeat from `fetch`, at most three times.
-6. A git that fails is never read as an empty answer: Android kills child processes, and one empty diff or missing HEAD would push a mass deletion. Only git's documented "no" (exit 1 from `rev-parse --verify`, `merge-base`, `diff --quiet`) counts as one. Anything else stops the sync.
+6. Submodules (`SubmoduleSync`) sync like the repo, depth first. Each has its git dir under the parent's `modules/<name>` and a `.git` file in its folder pointing there.
+   - The parent's `add` leaves submodule folders out; what it records for each is decided explicitly, never guessed from the folder.
+   - Before the parent commits, a submodule with work of its own (edits, or commits on no remote branch or tag and not behind the last commit it followed, which may have come by its id) gets a whole sync, so the parent only ever records a commit on the submodule's remote. Its work is synced only onto the branch the recorded commit is on.
+   - A submodule the parent's update moved follows to the new commit through `FolderUpdate`. The commit to follow sits in the parent's config until reached, so a kill in between never records the old one back. Otherwise the submodule's commit is this device's, and gets recorded.
+   - Where both sides moved a submodule, the commit that holds the other's wins; otherwise it is a `Choice`, whether the parent's merge or a pending follow finds it.
+   - Git dirs go by name and folders by path, so a submodule renamed or moved is taken out and set up afresh. A `.git` file naming one of the parent's own git dirs is never taken over.
+   - A submodule the parent's update no longer declares is taken out by `FolderUpdate` before the parent's folder moves, so the parent's own files there land in a cleared folder. Its work is synced first, and it moves on a detached HEAD so the removal is never pushed. Files only it had (ignored ones) stop it.
+   - A conflict or choice inside a submodule stops the sync. Any other trouble with one (out of reach, a `.git` directory of its own, files in the way) leaves it unrecorded while the rest syncs, and the sync ends `SUBMODULE`.
+7. A git that fails is never read as an empty answer: Android kills child processes, and one empty diff or missing HEAD would push a mass deletion. Only git's documented "no" (exit 1 from `rev-parse --verify`, `merge-base`, `diff --quiet`) counts as one. Anything else stops the sync.
 
 ## Open questions and risks
 

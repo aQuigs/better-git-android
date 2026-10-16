@@ -678,6 +678,450 @@ abstract class SafeSyncContract(tempParent: File? = null, workTreeParent: File? 
     }
 
     @Test
+    fun setsUpASubmoduleAtTheCommitTheBranchRecords() {
+        val library = addLibrary()
+        library.write("lib.md", "library, newer than the branch records\n")
+        library.commitAndPush("newer library")
+
+        assertEquals(SyncResult.Synced(pulled = 1, pushed = 0), sync())
+
+        assertEquals("library\n", files.read("lib/lib.md"))
+        assertEquals("", phoneGit("status", "--porcelain"))
+    }
+
+    @Test
+    fun followsTheSubmoduleWhereverTheBranchMovesIt() {
+        val library = addLibrary()
+        val first = git.ok(library, "rev-parse", "HEAD")
+        sync()
+        library.write("lib.md", "library, edited on the laptop\n")
+        library.commitAndPush("laptop library work")
+        laptopRecords(git.ok(library, "rev-parse", "HEAD"))
+
+        sync()
+        assertEquals("library, edited on the laptop\n", files.read("lib/lib.md"))
+
+        laptopRecords(first)
+        sync()
+        assertEquals("library\n", files.read("lib/lib.md"))
+        assertEquals("", phoneGit("status", "--porcelain"))
+    }
+
+    @Test
+    fun pushesAnEditMadeInASubmodule() {
+        val library = addLibrary()
+        sync()
+        files.write("lib/lib.md", "library, edited on the phone\n")
+
+        assertEquals(SyncResult.Synced(pulled = 0, pushed = 1), sync())
+
+        git.ok(library, "pull", "-q")
+        assertEquals("library, edited on the phone\n", library.read("lib.md"))
+        laptopPull()
+        assertEquals(git.ok(library, "rev-parse", "HEAD"), git.ok(laptop, "rev-parse", "HEAD:lib"))
+        assertEquals("", phoneGit("status", "--porcelain"))
+    }
+
+    @Test
+    fun combinesSubmoduleWorkFromBothSides() {
+        val library = addLibrary()
+        sync()
+        library.write("laptop.md", "from the laptop\n")
+        library.commitAndPush("laptop library work")
+        laptopRecords(git.ok(library, "rev-parse", "HEAD"))
+        files.write("lib/phone.md", "from the phone\n")
+
+        sync()
+
+        assertEquals("from the laptop\n", files.read("lib/laptop.md"))
+        git.ok(library, "pull", "-q")
+        assertEquals("from the phone\n", library.read("phone.md"))
+        laptopPull()
+        assertEquals(git.ok(library, "rev-parse", "HEAD"), git.ok(laptop, "rev-parse", "HEAD:lib"))
+    }
+
+    @Test
+    fun aConflictInASubmoduleStopsBeforeTheBranchRecordsIt() {
+        val library = addLibrary()
+        sync()
+        library.write("lib.md", "LAPTOP\n")
+        library.commitAndPush("laptop library edit")
+        files.write("lib/lib.md", "PHONE\n")
+        val remoteHead = git.ok(remote, "rev-parse", "main")
+        val libraryHead = git.ok(library, "rev-parse", "HEAD")
+
+        assertEquals(SyncResult.Conflict(listOf("lib/lib.md")), sync())
+
+        assertTrue(files.read("lib/lib.md"), "PHONE" in files.read("lib/lib.md") && "LAPTOP" in files.read("lib/lib.md"))
+        assertEquals(remoteHead, git.ok(remote, "rev-parse", "main"))
+        assertEquals(libraryHead, git.ok(library.resolve("../lib.git"), "rev-parse", "main"))
+    }
+
+    @Test
+    fun setsUpNestedSubmodules() {
+        val deep = libraryRepo("deep")
+        val library = libraryRepo()
+        recordSubmodule(library, "deep", "../deep.git", git.ok(deep, "rev-parse", "HEAD"))
+        recordSubmodule(laptop, "lib", "../lib.git", git.ok(library, "rev-parse", "HEAD"))
+
+        sync()
+
+        assertEquals("library\n", files.read("lib/deep/lib.md"))
+        assertEquals("", phoneGit("status", "--porcelain"))
+    }
+
+    @Test
+    fun takesOutASubmoduleTheBranchRemoves() {
+        addLibrary()
+        sync()
+        laptopDropsLibrary()
+        laptop.commitAndPush("remove the library")
+
+        sync()
+
+        assertFalse(files.resolve("lib").exists())
+        assertEquals("", phoneGit("status", "--porcelain"))
+    }
+
+    @Test
+    fun asksWhichCommitToKeepWhenTheSidesRecordDifferentSubmoduleHistories() {
+        val library = addLibrary()
+        sync()
+        git.ok(library, "checkout", "-q", "-b", "side")
+        library.write("side.md", "on a side branch\n")
+        library.commitAndPush("side work", branch = "side")
+        laptopRecords(git.ok(library, "rev-parse", "HEAD"))
+        files.write("lib/phone.md", "from the phone\n")
+
+        val choice = asked(sync()).single()
+        assertEquals("lib", choice.path)
+
+        sync(choices = mapOf(choice to Keep.REMOTE))
+        assertEquals("on a side branch\n", files.read("lib/side.md"))
+        assertEquals(git.ok(library, "rev-parse", "HEAD"), git.ok(remote, "rev-parse", "main:lib"))
+    }
+
+    @Test
+    fun replacesASubmodulePointerToARepoThatIsGone() {
+        addLibrary()
+        // As an earlier install of the app, whose private storage is gone, leaves it
+        files.write("lib/.git", "gitdir: /gone/modules/lib\n")
+
+        assertEquals(SyncResult.Synced(pulled = 1, pushed = 0), sync())
+        assertEquals("library\n", files.read("lib/lib.md"))
+        assertEquals("", phoneGit("status", "--porcelain"))
+    }
+
+    @Test
+    fun leavesASubmoduleFolderThatHasARepoOfItsOwnAndSyncsTheRest() {
+        addLibrary()
+        sync()
+        // Its pointer replaced by a repo of its own, as an older git leaves a submodule
+        files.resolve("lib/.git").delete()
+        git.ok(files.resolve("lib"), "init", "-q")
+        files.write("notes.md", "one\ntwo\nthree, edited on the phone\n")
+
+        val result = sync() as SyncResult.Failed
+
+        assertEquals(Problem.SUBMODULE, result.problem)
+        assertTrue(result.detail, result.detail.startsWith("lib: "))
+        assertTrue(files.resolve("lib/.git").isDirectory)
+        laptopPull()
+        assertEquals("one\ntwo\nthree, edited on the phone\n", laptop.read("notes.md"))
+    }
+
+    @Test
+    fun syncsTheRestWhenASubmoduleIsOutOfReach() {
+        val library = libraryRepo()
+        recordSubmodule(laptop, "lib", temp.root.resolve("nowhere.git").path, git.ok(library, "rev-parse", "HEAD"))
+        sync()
+        files.write("notes.md", "one\ntwo\nthree, edited on the phone\n")
+
+        assertEquals(Problem.SUBMODULE, (sync() as SyncResult.Failed).problem)
+
+        laptopPull()
+        assertEquals("one\ntwo\nthree, edited on the phone\n", laptop.read("notes.md"))
+        assertEquals(git.ok(library, "rev-parse", "HEAD"), git.ok(laptop, "rev-parse", "HEAD:lib"))
+    }
+
+    @Test
+    fun keepsAPushedSubmoduleEditWhileAnotherSubmoduleHasAConflict() {
+        val library = addLibrary()
+        val other = libraryRepo("other")
+        recordSubmodule(laptop, "other", "../other.git", git.ok(other, "rev-parse", "HEAD"))
+        sync()
+        files.write("lib/lib.md", "library, edited on the phone\n")
+        other.write("lib.md", "LAPTOP\n")
+        other.commitAndPush("laptop edit")
+        files.write("other/lib.md", "PHONE\n")
+
+        assertEquals(SyncResult.Conflict(listOf("other/lib.md")), sync())
+        assertEquals(SyncResult.Conflict(listOf("other/lib.md")), sync())
+
+        assertEquals("library, edited on the phone\n", files.read("lib/lib.md"))
+        git.ok(library, "pull", "-q")
+        assertEquals("library, edited on the phone\n", library.read("lib.md"))
+    }
+
+    @Test
+    fun recordsAPushedSubmoduleCommitAfterAKill() {
+        val library = addLibrary()
+        sync()
+        files.write("lib/lib.md", "library, edited on the phone\n")
+        val parentAdd = git.onFirst({ call -> "add" in call.args && !call.inSubmodule }) { throw Killed() }
+
+        assertThrows(Killed::class.java) { sync(parentAdd) }
+        sync()
+
+        assertEquals("library, edited on the phone\n", files.read("lib/lib.md"))
+        laptopPull()
+        git.ok(library, "pull", "-q")
+        assertEquals(git.ok(library, "rev-parse", "HEAD"), git.ok(laptop, "rev-parse", "HEAD:lib"))
+    }
+
+    @Test
+    fun followsTheSubmoduleAfterAKillInsteadOfRecordingItBack() {
+        val library = addLibrary()
+        sync()
+        library.write("lib.md", "library, edited on the laptop\n")
+        library.commitAndPush("laptop library work")
+        laptopRecords(git.ok(library, "rev-parse", "HEAD"))
+        val submoduleFetch = git.onFirst({ call -> "fetch" in call.args && call.inSubmodule }) { throw Killed() }
+
+        assertThrows(Killed::class.java) { sync(submoduleFetch) }
+        files.write("notes.md", "one\ntwo\nthree, edited on the phone\n")
+        sync()
+
+        assertEquals("library, edited on the laptop\n", files.read("lib/lib.md"))
+        assertEquals(git.ok(library, "rev-parse", "HEAD"), git.ok(remote, "rev-parse", "main:lib"))
+    }
+
+    @Test
+    fun syncsNoSubmoduleWorkOntoABranchItsCommitIsNotOn() {
+        val library = addLibrary()
+        sync()
+        git.ok(library, "checkout", "-q", "-b", "side")
+        library.write("side.md", "on a side branch\n")
+        library.commitAndPush("side work", branch = "side")
+        laptopRecords(git.ok(library, "rev-parse", "HEAD"))
+        sync()
+        files.write("lib/phone.md", "from the phone\n")
+        val libraryMain = git.ok(library, "rev-parse", "origin/main")
+        // A pull too, so the report must outlast the pass after the folder moves
+        laptop.write("todo.md", "from the laptop\n")
+        laptop.commitAndPush("laptop todo")
+
+        val result = sync() as SyncResult.Failed
+
+        assertEquals(Problem.SUBMODULE, result.problem)
+        assertEquals("from the laptop\n", files.read("todo.md"))
+        git.ok(library, "fetch", "-q")
+        assertEquals(libraryMain, git.ok(library, "rev-parse", "origin/main"))
+        assertEquals("from the phone\n", files.read("lib/phone.md"))
+    }
+
+    @Test
+    fun keepsTheFilesOfASubmoduleTurnedIntoAFolder() {
+        val library = addLibrary()
+        sync()
+        laptopDropsLibrary()
+        laptop.write("lib/lib.md", "library\n")
+        laptop.write("lib/added.md", "added with the folder\n")
+        laptop.commitAndPush("turn the library into a folder")
+        val libraryHead = git.ok(library, "rev-parse", "HEAD")
+
+        sync()
+        sync()
+
+        assertEquals("library\n", files.read("lib/lib.md"))
+        assertEquals("added with the folder\n", files.read("lib/added.md"))
+        assertFalse(files.resolve("lib/.git").exists())
+        assertEquals("", phoneGit("status", "--porcelain"))
+        assertEquals(git.ok(laptop, "rev-parse", "HEAD"), git.ok(remote, "rev-parse", "main"))
+        assertEquals(libraryHead, git.ok(library.resolve("../lib.git"), "rev-parse", "main"))
+    }
+
+    @Test
+    fun takesTheFolderOfASubmoduleTurnedIntoOneWithOtherFiles() {
+        addLibrary()
+        sync()
+        laptopDropsLibrary()
+        laptop.write("lib/lib.md", "library, changed as it became a folder\n")
+        laptop.commitAndPush("turn the library into a folder")
+
+        sync()
+
+        assertEquals("library, changed as it became a folder\n", files.read("lib/lib.md"))
+        assertFalse(files.resolve("lib/.git").exists())
+        assertEquals("", phoneGit("status", "--porcelain"))
+    }
+
+    @Test
+    fun neverPushesTheTakingOutOfASubmoduleKilledHalfway() {
+        val library = addLibrary()
+        sync()
+        laptopDropsLibrary()
+        laptop.commitAndPush("remove the library")
+        val libraryHead = git.ok(library, "rev-parse", "HEAD")
+        val takingOut = git.onFirst({ call -> call.updatesIndex && call.inSubmodule }) { throw Killed() }
+
+        assertThrows(Killed::class.java) { sync(takingOut) }
+        sync()
+        sync()
+
+        assertFalse(files.resolve("lib").exists())
+        assertEquals(libraryHead, git.ok(library.resolve("../lib.git"), "rev-parse", "main"))
+    }
+
+    @Test
+    fun keepsTheSubmoduleOnlyFilesOfOneTakenOut() {
+        val library = addLibrary()
+        library.write(".gitignore", "secret.txt\n")
+        library.commitAndPush("ignore secrets")
+        laptopRecords(git.ok(library, "rev-parse", "HEAD"))
+        sync()
+        files.write("lib/secret.txt", "secret\n")
+        laptopDropsLibrary()
+        laptop.commitAndPush("remove the library")
+
+        assertEquals(Problem.SUBMODULE, (sync() as SyncResult.Failed).problem)
+
+        assertEquals("secret\n", files.read("lib/secret.txt"))
+        laptopPull()
+        assertFalse(laptop.resolve("lib/secret.txt").exists())
+    }
+
+    @Test
+    fun finishesSettingUpASubmoduleAfterAKill() {
+        addLibrary()
+        val firstFetch = git.onFirst({ call -> "fetch" in call.args && call.inSubmodule }) { throw Killed() }
+
+        assertThrows(Killed::class.java) { sync(firstFetch) }
+        sync()
+
+        assertEquals("library\n", files.read("lib/lib.md"))
+        assertEquals("", phoneGit("status", "--porcelain"))
+    }
+
+    @Test
+    fun startsASubmoduleRenamedInPlaceAfresh() {
+        val library = addLibrary()
+        sync()
+        files.write("lib/lib.md", "library, edited on the phone\n")
+        renameLibrary(name = "library", path = "lib")
+
+        sync()
+
+        assertEquals("library, edited on the phone\n", files.read("lib/lib.md"))
+        git.ok(library, "pull", "-q")
+        assertEquals("library, edited on the phone\n", library.read("lib.md"))
+        assertEquals(git.ok(library, "rev-parse", "HEAD"), git.ok(remote, "rev-parse", "main:lib"))
+    }
+
+    @Test
+    fun neverPushesTheTakingOutOfASubmoduleRenamedInPlace() {
+        val library = addLibrary()
+        library.write(".gitignore", "secret.txt\n")
+        library.commitAndPush("ignore secrets")
+        laptopRecords(git.ok(library, "rev-parse", "HEAD"))
+        sync()
+        files.write("lib/secret.txt", "secret\n")
+        val libraryHead = git.ok(library, "rev-parse", "HEAD")
+        renameLibrary(name = "library", path = "lib")
+        laptop.write("todo.md", "from the laptop\n")
+        laptop.commitAndPush("laptop todo")
+
+        repeat(2) { assertEquals(Problem.SUBMODULE, (sync() as SyncResult.Failed).problem) }
+
+        assertEquals(libraryHead, git.ok(library.resolve("../lib.git"), "rev-parse", "main"))
+        assertEquals("secret\n", files.read("lib/secret.txt"))
+        assertEquals("from the laptop\n", files.read("todo.md"))
+    }
+
+    @Test
+    fun neverPushesARecordedCommitThatOnlyATagHolds() {
+        val library = libraryRepo()
+        git.ok(library, "checkout", "-q", "--detach")
+        library.write("lib.md", "release\n")
+        git.ok(library, "commit", "-qam", "release")
+        git.ok(library, "tag", "v1")
+        git.ok(library, "push", "-q", "origin", "v1")
+        recordSubmodule(laptop, "lib", "../lib.git", git.ok(library, "rev-parse", "v1"))
+        val libraryMain = git.ok(library.resolve("../lib.git"), "rev-parse", "main")
+        sync()
+        assertEquals("release\n", files.read("lib/lib.md"))
+        laptopDropsLibrary()
+        laptop.commitAndPush("remove the library")
+
+        sync()
+
+        assertFalse(files.resolve("lib").exists())
+        assertEquals(libraryMain, git.ok(library.resolve("../lib.git"), "rev-parse", "main"))
+    }
+
+    @Test
+    fun followsASubmoduleWhoseNameEndsInOld() {
+        val library = libraryRepo()
+        recordSubmodule(laptop, "lib", "../lib.git", git.ok(library, "rev-parse", "HEAD"), name = "lib.old")
+        sync()
+        library.write("lib.md", "library, edited on the laptop\n")
+        library.commitAndPush("laptop library work")
+        laptopRecords(git.ok(library, "rev-parse", "HEAD"))
+
+        sync()
+
+        assertEquals("library, edited on the laptop\n", files.read("lib/lib.md"))
+    }
+
+    @Test
+    fun movesASubmoduleTheLaptopMoved() {
+        addLibrary()
+        sync()
+        renameLibrary(name = "lib", path = "vendor/lib")
+
+        sync()
+        sync()
+
+        assertEquals("library\n", files.read("vendor/lib/lib.md"))
+        assertFalse(files.resolve("lib").exists())
+        assertEquals(listOf(".gitmodules", "notes.md", "vendor/lib"), git.ok(remote, "ls-tree", "-r", "--name-only", "main").lines())
+    }
+
+    @Test
+    fun asksWhichCommitToKeepWhenThePhoneAndTheRemoteMovedASubmoduleApart() {
+        val library = addLibrary()
+        sync()
+        library.write("lib.md", "library, edited on the laptop\n")
+        git.ok(library, "commit", "-qam", "laptop library work, not pushed yet")
+        val laptops = git.ok(library, "rev-parse", "HEAD")
+        laptopRecords(laptops)
+        // The phone cannot follow yet, and its user edits the submodule meanwhile
+        assertEquals(Problem.SUBMODULE, (sync() as SyncResult.Failed).problem)
+        files.write("lib/phone.md", "from the phone\n")
+        assertEquals(Problem.SUBMODULE, (sync() as SyncResult.Failed).problem)
+        assertEquals(laptops, git.ok(remote, "rev-parse", "main:lib"))
+        git.ok(library, "push", "-q", "origin", "HEAD:side")
+        val choice = asked(sync()).single()
+
+        assertEquals(Choice("lib", local = choice.local, remote = laptops), choice)
+        sync(choices = mapOf(choice to Keep.LOCAL))
+        assertEquals(choice.local, git.ok(remote, "rev-parse", "main:lib"))
+        assertEquals("from the phone\n", files.read("lib/phone.md"))
+    }
+
+    @Test
+    fun syncsASubmoduleWhoseNameHasASpace() {
+        val library = libraryRepo()
+        recordSubmodule(laptop, "My Library", "../lib.git", git.ok(library, "rev-parse", "HEAD"))
+
+        sync()
+        files.write("My Library/lib.md", "library, edited on the phone\n")
+
+        assertEquals(SyncResult.Synced(pulled = 0, pushed = 1), sync())
+        assertEquals(SyncResult.UpToDate, sync())
+    }
+
+    @Test
     fun leavesSubmoduleFoldersToTheirRepos() {
         val commit = git.ok(laptop, "rev-parse", "HEAD")
         git.ok(laptop, "update-index", "--add", "--cacheinfo", "160000,$commit,library")
@@ -908,10 +1352,60 @@ abstract class SafeSyncContract(tempParent: File? = null, workTreeParent: File? 
 
     private fun laptopPull() = git.ok(laptop, "pull", "-q", "--rebase")
 
-    private fun File.commitAndPush(message: String, force: Boolean = false) {
+    /** A library repo with one file, cloned on the laptop. */
+    private fun libraryRepo(name: String = "lib"): File {
+        val bare = temp.newFolder("$name.git")
+        git.ok(bare, "init", "-q", "--bare", "-b", "main")
+        return clone("$name-laptop", bare).apply {
+            write("lib.md", "library\n")
+            commitAndPush("first library")
+        }
+    }
+
+    /** The laptop adds the library at lib, and returns its clone of the library. */
+    private fun addLibrary(): File {
+        val library = libraryRepo()
+        recordSubmodule(laptop, "lib", "../lib.git", git.ok(library, "rev-parse", "HEAD"))
+        return library
+    }
+
+    /**
+     * Commits and pushes [commit] as a submodule at [path] of [repo], by hand: `git submodule` needs a shell the device
+     * lacks.
+     */
+    private fun recordSubmodule(repo: File, path: String, url: String, commit: String, name: String = path) {
+        repo.resolve(".gitmodules").appendText("[submodule \"$name\"]\n\tpath = $path\n\turl = $url\n")
+        // An empty folder where the submodule sits, so that git reads it as not checked out rather than deleted
+        repo.resolve(path).mkdirs()
+        git.ok(repo, "add", ".gitmodules")
+        git.ok(repo, "update-index", "--add", "--cacheinfo", "160000,$commit,$path")
+        git.ok(repo, "commit", "-q", "-m", "add $path")
+        git.ok(repo, "push", "-q", "origin", "HEAD:main")
+    }
+
+    /** The laptop declares the library under [name] at [path], recording the same commit. */
+    private fun renameLibrary(name: String, path: String) {
+        val commit = git.ok(laptop, "rev-parse", "HEAD:lib")
+        laptopDropsLibrary()
+        recordSubmodule(laptop, path, "../lib.git", commit, name)
+    }
+
+    /** The laptop stages taking the library out, leaving its commit to the caller. */
+    private fun laptopDropsLibrary() {
+        git.ok(laptop, "rm", "-q", "--cached", "lib")
+        git.ok(laptop, "rm", "-q", ".gitmodules")
+    }
+
+    private fun laptopRecords(libraryCommit: String) {
+        git.ok(laptop, "update-index", "--cacheinfo", "160000,$libraryCommit,lib")
+        git.ok(laptop, "commit", "-q", "-m", "move the library")
+        git.ok(laptop, "push", "-q", "origin", "HEAD:main")
+    }
+
+    private fun File.commitAndPush(message: String, force: Boolean = false, branch: String = "main") {
         git.ok(this, "add", "--all")
         git.ok(this, "commit", "-q", "-m", message)
-        git.ok(this, "push", "-q", *(if (force) arrayOf("--force") else emptyArray()), "origin", "HEAD:main")
+        git.ok(this, "push", "-q", *(if (force) arrayOf("--force") else emptyArray()), "origin", "HEAD:$branch")
     }
 
     private fun File.write(path: String, text: String) = resolve(path).apply { parentFile.mkdirs() }.writeText(text)

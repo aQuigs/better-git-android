@@ -9,12 +9,12 @@ import com.sqftware.safegit.git.GitResult
  * Android kills child processes under memory pressure, so a git that failed must never read as an empty answer: one
  * empty diff or missing HEAD is enough to push a mass deletion. [check] and [probe] throw [GitFailure] instead.
  */
-internal class RepoGit(private val git: Git, val repo: Repo, private val identity: Identity) {
+internal class RepoGit(val cli: Git, val repo: Repo, val identity: Identity) {
     val emptyTree by lazy { check("mktree").stdout.trim() }
     val emptyBlob by lazy { check("hash-object", "-w", "--stdin").stdout.trim() }
     val ignoreCase by lazy { output("config", "--bool", "core.ignorecase") == "true" }
 
-    fun run(vararg args: String, environment: Map<String, String> = emptyMap(), input: String = ""): GitResult = git.run(
+    fun run(vararg args: String, environment: Map<String, String> = emptyMap(), input: String = ""): GitResult = cli.run(
         repo.workTree,
         listOf("--git-dir=${repo.gitDir.path}", "--work-tree=${repo.workTree.path}") + args,
         identity.environment + environment,
@@ -42,6 +42,19 @@ internal class RepoGit(private val git: Git, val repo: Repo, private val identit
 
     /** The branch's commit, or null before its first one. */
     fun head() = resolve("HEAD^{commit}")
+
+    /** The branch HEAD is on, or null when it is on none. */
+    fun branch() = output("symbolic-ref", "--quiet", "--short", "HEAD")
+
+    /** The remote-tracking ref [branch] syncs with, from config, which knows it before the branch's first commit. */
+    fun upstream(branch: String): String? {
+        val remote = output("config", "branch.$branch.remote") ?: return null
+        val merge = output("config", "branch.$branch.merge") ?: return null
+        return "refs/remotes/$remote/${merge.removePrefix("refs/heads/")}"
+    }
+
+    /** The same git for another repo, such as a submodule. */
+    fun at(repo: Repo) = RepoGit(cli, repo, identity)
 
     /**
      * Merges three trees. Git would guess that a file added to a folder the other side renamed belongs in the renamed
