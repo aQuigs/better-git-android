@@ -105,31 +105,44 @@ class SafeSync(
         credentials: Credentials = Credentials.NONE,
         choices: Map<Choice, Keep> = emptyMap(),
         step: (Step) -> Unit = {},
-    ): SyncResult = try {
-        Session(RepoGit(git, repo, identity), credentials, choices, step).sync()
-    } catch (e: GitFailure) {
-        SyncResult.Failed(Problem.GIT, e.message.orEmpty())
-    } catch (e: IOException) {
-        SyncResult.Failed(Problem.FOLDER_WRITE, e.message.orEmpty())
+    ): SyncResult = nested(repo, credentials, choices, step, fetched = false).let { (result, problems) ->
+        // The user should hear about a submodule left behind even though the rest synced
+        if (problems.isEmpty() || (result != SyncResult.UpToDate && result !is SyncResult.Synced)) result
+        else SyncResult.Failed(Problem.SUBMODULE, problems.entries.joinToString("\n") { (path, problem) -> "$path: $problem" })
     }
 
+    /** A sync whose submodules left as they were come back as data, for a parent repo to report. */
+    private fun nested(repo: Repo, credentials: Credentials, choices: Map<Choice, Keep>, step: (Step) -> Unit, fetched: Boolean): NestedSync {
+        val session = Session(RepoGit(git, repo, identity), credentials, choices, step, fetched)
+        val result = try {
+            session.sync()
+        } catch (e: GitFailure) {
+            SyncResult.Failed(Problem.GIT, e.message.orEmpty())
+        } catch (e: IOException) {
+            SyncResult.Failed(Problem.FOLDER_WRITE, e.message.orEmpty())
+        }
+        return NestedSync(result, session.submodules.problems)
+    }
+
+    /** With [fetched], the remote was fetched just before, so the first attempt need not fetch again. */
     private inner class Session(
         private val git: RepoGit,
         private val credentials: Credentials,
         private val choices: Map<Choice, Keep>,
         private val step: (Step) -> Unit,
+        private var fetched: Boolean,
     ) {
         private val folder = FolderUpdate(git)
         private val markers = Markers(device)
         private val held = HeldConflict(git, markers)
-        private val submodules = SubmoduleSync(git, credentials, choices, step, now) { repo, choices -> this@SafeSync.sync(repo, credentials, choices, step) }
+        val submodules = SubmoduleSync(git, credentials, choices, step, now) { repo, choices -> nested(repo, credentials, choices, step, fetched = true) }
 
         fun sync(): SyncResult {
             // Nothing else uses this git dir, so a lock left now is from a sync the system killed
             git.repo.gitDir.walk().onEnter { it.name != "objects" }.filter { it.isFile && it.name.endsWith(".lock") }
                 .forEach(File::delete)
 
-            val branch = git.output("symbolic-ref", "--quiet", "--short", "HEAD") ?: return SyncResult.Failed(Problem.NOT_ON_BRANCH)
+            val branch = git.branch() ?: return SyncResult.Failed(Problem.NOT_ON_BRANCH)
             // Read from config rather than for-each-ref, which knows no upstream before the branch's first commit
             val config = git.output("config", "--get-regexp", "^branch\\.")?.lines().orEmpty()
                 .associate { it.substringBefore(" ") to it.substringAfter(" ") }
@@ -145,13 +158,15 @@ class SafeSync(
             repeat(ATTEMPTS) {
                 // A blocked update has just committed what blocked it, and needs no new fetch
                 if (retry != Problem.FOLDER_KEPT_CHANGING) {
-                    submodules.bringUp()?.let { return it }
-                    stageLocalChanges().takeIf { it.isNotEmpty() }?.let { return SyncResult.Conflict(it) }
+                    stageLocalChanges()?.let { return it }
                     commitStaged()
-                    step(Step.FETCH)
-                    // Submodules are fetched by SubmoduleSync, which can leave one out of reach without failing this
-                    val fetch = git.run("fetch", "--quiet", "--no-recurse-submodules", remote, environment = credentials.environment())
-                    if (!fetch.ok) return fetch.failed(Problem.FETCH)
+                    if (!fetched) {
+                        step(Step.FETCH)
+                        // Submodules are fetched by SubmoduleSync, which can leave one out of reach without failing this
+                        val fetch = git.run("fetch", "--quiet", "--no-recurse-submodules", remote, environment = credentials.environment())
+                        if (!fetch.ok) return fetch.failed(Problem.FETCH)
+                    }
+                    fetched = false
                 }
 
                 val head = git.head()
@@ -172,21 +187,20 @@ class SafeSync(
                         git.check("update-ref", "refs/safegit/backup/${now()}", head!!)
                     }
 
-                    submodules.beforeMove(head, target)
+                    submodules.beforeMove(head, target)?.let { return it }
                     step(Step.UPDATE_FOLDER)
-                    when (val update = folder.move(from = head ?: git.emptyTree, to = target)) {
+                    when (val moved = folder.move(from = head ?: git.emptyTree, to = target)) {
                         FolderUpdate.Result.Done -> {
-                            submodules.bringUp()?.let { return it }
+                            submodules.bringUp(onlyMoved = true)?.let { return it }
                             if (combined is Combined.Marked) return SyncResult.Conflict(combined.paths)
                             pulled += behind
                         }
-                        is FolderUpdate.Result.WriteFailed -> return SyncResult.Failed(Problem.FOLDER_WRITE, update.detail)
+                        is FolderUpdate.Result.WriteFailed -> return SyncResult.Failed(Problem.FOLDER_WRITE, moved.detail)
                         // Usually a file changed after the commit, e.g. a notes app saved it: commit that too and retry
                         is FolderUpdate.Result.Blocked -> {
-                            submodules.bringUp()?.let { return it }
-                            stageLocalChanges().takeIf { it.isNotEmpty() }?.let { return SyncResult.Conflict(it) }
+                            stageLocalChanges()?.let { return it }
                             if (!commitStaged()) {
-                                return SyncResult.Failed(Problem.FOLDER_BLOCKED, update.paths.joinToString("\n"))
+                                return SyncResult.Failed(Problem.FOLDER_BLOCKED, moved.paths.joinToString("\n"))
                             }
                             retry = Problem.FOLDER_KEPT_CHANGING
                             return@repeat
@@ -195,13 +209,13 @@ class SafeSync(
                     pushing = if (target == upstreamHead) 0 else 1
                 }
                 if (pushing == 0) {
-                    return done(if (pulled == 0) SyncResult.UpToDate else SyncResult.Synced(pulled, pushed = 0))
+                    return if (pulled == 0) SyncResult.UpToDate else SyncResult.Synced(pulled, pushed = 0)
                 }
 
                 step(Step.PUSH)
                 val push = git.run("push", "--porcelain", remote, "HEAD:$merge", environment = credentials.environment())
                 if (push.ok) {
-                    return done(SyncResult.Synced(pulled, pushed = pushing))
+                    return SyncResult.Synced(pulled, pushed = pushing)
                 }
                 if ("[rejected]" !in push.stdout) {
                     return push.failed(Problem.PUSH)
@@ -211,21 +225,19 @@ class SafeSync(
             return SyncResult.Failed(retry!!)
         }
 
-        /** [result], unless a submodule was left behind, which the user should hear about even though the rest synced. */
-        private fun done(result: SyncResult) = if (submodules.problems.isEmpty()) result else {
-            SyncResult.Failed(Problem.SUBMODULE, submodules.problems.entries.joinToString("\n") { (path, problem) -> "$path: $problem" })
-        }
-
         /**
-         * Stages everything changed in the folder, and returns the files that would gain this device's conflict markers.
-         * Those are never committed, whatever their names now: the user may have renamed a file before resolving it.
+         * Brings the submodules up to date and stages everything changed in the folder. Stops with the files that would
+         * gain this device's conflict markers: those are never committed, whatever their names now, as the user may
+         * have renamed a file before resolving it.
          */
-        private fun stageLocalChanges(): List<String> {
+        private fun stageLocalChanges(): SyncResult? {
+            submodules.bringUp()?.let { return it }
             step(Step.COMMIT)
             git.check("add", "--all", "--", ".", *submodules.excludes().toTypedArray())
             submodules.stage()
             val candidates = git.check("diff", "--cached", "--name-only", "--no-renames", "-z", "-G", markers.pattern).stdout.paths()
-            return candidates.filter { markerCount(":$it") > (if (git.head() == null) 0 else markerCount("HEAD:$it")) }
+            val marked = candidates.filter { markerCount(":$it") > (if (git.head() == null) 0 else markerCount("HEAD:$it")) }
+            return if (marked.isEmpty()) null else SyncResult.Conflict(marked)
         }
 
         private fun markerCount(blob: String): Int {
@@ -356,7 +368,6 @@ class SafeSync(
     }
 
     private fun GitResult.failed(problem: Problem) = SyncResult.Failed(problem, stderr.trim())
-
 
     private companion object {
         const val ATTEMPTS = 3

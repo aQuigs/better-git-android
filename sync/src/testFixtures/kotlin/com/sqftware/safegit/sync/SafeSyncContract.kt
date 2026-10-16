@@ -759,19 +759,14 @@ abstract class SafeSyncContract(tempParent: File? = null, workTreeParent: File? 
 
     @Test
     fun setsUpNestedSubmodules() {
-        val deep = temp.newFolder("deep.git").also { git.ok(it, "init", "-q", "--bare", "-b", "main") }
-        val deepLaptop = clone("deep-laptop", deep)
-        deepLaptop.write("deep.md", "deep\n")
-        deepLaptop.commitAndPush("deep")
+        val deep = libraryRepo("deep")
         val library = libraryRepo()
-        recordSubmodule(library, "deep", "../deep.git", git.ok(deepLaptop, "rev-parse", "HEAD"))
-        git.ok(library, "push", "-q", "origin", "HEAD:main")
+        recordSubmodule(library, "deep", "../deep.git", git.ok(deep, "rev-parse", "HEAD"))
         recordSubmodule(laptop, "lib", "../lib.git", git.ok(library, "rev-parse", "HEAD"))
-        git.ok(laptop, "push", "-q", "origin", "HEAD:main")
 
         sync()
 
-        assertEquals("deep\n", files.read("lib/deep/deep.md"))
+        assertEquals("library\n", files.read("lib/deep/lib.md"))
         assertEquals("", phoneGit("status", "--porcelain"))
     }
 
@@ -779,9 +774,8 @@ abstract class SafeSyncContract(tempParent: File? = null, workTreeParent: File? 
     fun takesOutASubmoduleTheBranchRemoves() {
         addLibrary()
         sync()
-        git.ok(laptop, "rm", "-q", "--cached", "lib", ".gitmodules")
-        git.ok(laptop, "commit", "-q", "-m", "remove the library")
-        git.ok(laptop, "push", "-q", "origin", "HEAD:main")
+        laptopDropsLibrary()
+        laptop.commitAndPush("remove the library")
 
         sync()
 
@@ -840,7 +834,6 @@ abstract class SafeSyncContract(tempParent: File? = null, workTreeParent: File? 
     fun syncsTheRestWhenASubmoduleIsOutOfReach() {
         val library = libraryRepo()
         recordSubmodule(laptop, "lib", temp.root.resolve("nowhere.git").path, git.ok(library, "rev-parse", "HEAD"))
-        git.ok(laptop, "push", "-q", "origin", "HEAD:main")
         sync()
         files.write("notes.md", "one\ntwo\nthree, edited on the phone\n")
 
@@ -856,7 +849,6 @@ abstract class SafeSyncContract(tempParent: File? = null, workTreeParent: File? 
         val library = addLibrary()
         val other = libraryRepo("other")
         recordSubmodule(laptop, "other", "../other.git", git.ok(other, "rev-parse", "HEAD"))
-        git.ok(laptop, "push", "-q", "origin", "HEAD:main")
         sync()
         files.write("lib/lib.md", "library, edited on the phone\n")
         other.write("lib.md", "LAPTOP\n")
@@ -928,8 +920,7 @@ abstract class SafeSyncContract(tempParent: File? = null, workTreeParent: File? 
     fun keepsTheFilesOfASubmoduleTurnedIntoAFolder() {
         val library = addLibrary()
         sync()
-        git.ok(laptop, "rm", "-q", "--cached", "lib")
-        git.ok(laptop, "rm", "-q", ".gitmodules")
+        laptopDropsLibrary()
         laptop.write("lib/lib.md", "library\n")
         laptop.write("lib/added.md", "added with the folder\n")
         laptop.commitAndPush("turn the library into a folder")
@@ -947,11 +938,25 @@ abstract class SafeSyncContract(tempParent: File? = null, workTreeParent: File? 
     }
 
     @Test
+    fun takesTheFolderOfASubmoduleTurnedIntoOneWithOtherFiles() {
+        addLibrary()
+        sync()
+        laptopDropsLibrary()
+        laptop.write("lib/lib.md", "library, changed as it became a folder\n")
+        laptop.commitAndPush("turn the library into a folder")
+
+        sync()
+
+        assertEquals("library, changed as it became a folder\n", files.read("lib/lib.md"))
+        assertFalse(files.resolve("lib/.git").exists())
+        assertEquals("", phoneGit("status", "--porcelain"))
+    }
+
+    @Test
     fun neverPushesTheTakingOutOfASubmoduleKilledHalfway() {
         val library = addLibrary()
         sync()
-        git.ok(laptop, "rm", "-q", "--cached", "lib")
-        git.ok(laptop, "rm", "-q", ".gitmodules")
+        laptopDropsLibrary()
         laptop.commitAndPush("remove the library")
         val libraryHead = git.ok(library, "rev-parse", "HEAD")
         val takingOut = git.onFirst({ call -> call.updatesIndex && call.inSubmodule }) { throw Killed() }
@@ -972,8 +977,7 @@ abstract class SafeSyncContract(tempParent: File? = null, workTreeParent: File? 
         laptopRecords(git.ok(library, "rev-parse", "HEAD"))
         sync()
         files.write("lib/secret.txt", "secret\n")
-        git.ok(laptop, "rm", "-q", "--cached", "lib")
-        git.ok(laptop, "rm", "-q", ".gitmodules")
+        laptopDropsLibrary()
         laptop.commitAndPush("remove the library")
 
         assertEquals(Problem.SUBMODULE, (sync() as SyncResult.Failed).problem)
@@ -1067,7 +1071,6 @@ abstract class SafeSyncContract(tempParent: File? = null, workTreeParent: File? 
     fun syncsASubmoduleWhoseNameHasASpace() {
         val library = libraryRepo()
         recordSubmodule(laptop, "My Library", "../lib.git", git.ok(library, "rev-parse", "HEAD"))
-        git.ok(laptop, "push", "-q", "origin", "HEAD:main")
 
         sync()
         files.write("My Library/lib.md", "library, edited on the phone\n")
@@ -1321,30 +1324,34 @@ abstract class SafeSyncContract(tempParent: File? = null, workTreeParent: File? 
     private fun addLibrary(): File {
         val library = libraryRepo()
         recordSubmodule(laptop, "lib", "../lib.git", git.ok(library, "rev-parse", "HEAD"))
-        git.ok(laptop, "push", "-q", "origin", "HEAD:main")
         return library
     }
 
-    /** Commits [commit] as a submodule at [path] of [repo], by hand: `git submodule` needs a shell the device lacks. */
-    private fun recordSubmodule(repo: File, path: String, url: String, commit: String) {
-        repo.resolve(".gitmodules").appendText("[submodule \"$path\"]\n\tpath = $path\n\turl = $url\n")
+    /**
+     * Commits and pushes [commit] as a submodule at [path] of [repo], by hand: `git submodule` needs a shell the device
+     * lacks.
+     */
+    private fun recordSubmodule(repo: File, path: String, url: String, commit: String, name: String = path) {
+        repo.resolve(".gitmodules").appendText("[submodule \"$name\"]\n\tpath = $path\n\turl = $url\n")
         // An empty folder where the submodule sits, so that git reads it as not checked out rather than deleted
         repo.resolve(path).mkdirs()
         git.ok(repo, "add", ".gitmodules")
         git.ok(repo, "update-index", "--add", "--cacheinfo", "160000,$commit,$path")
         git.ok(repo, "commit", "-q", "-m", "add $path")
+        git.ok(repo, "push", "-q", "origin", "HEAD:main")
     }
 
     /** The laptop declares the library under [name] at [path], recording the same commit. */
     private fun renameLibrary(name: String, path: String) {
         val commit = git.ok(laptop, "rev-parse", "HEAD:lib")
+        laptopDropsLibrary()
+        recordSubmodule(laptop, path, "../lib.git", commit, name)
+    }
+
+    /** The laptop stages taking the library out, leaving its commit to the caller. */
+    private fun laptopDropsLibrary() {
         git.ok(laptop, "rm", "-q", "--cached", "lib")
-        laptop.resolve(".gitmodules").writeText("[submodule \"$name\"]\n\tpath = $path\n\turl = ../lib.git\n")
-        laptop.resolve(path).mkdirs()
-        git.ok(laptop, "add", ".gitmodules")
-        git.ok(laptop, "update-index", "--add", "--cacheinfo", "160000,$commit,$path")
-        git.ok(laptop, "commit", "-q", "-m", "declare the library as $name at $path")
-        git.ok(laptop, "push", "-q", "origin", "HEAD:main")
+        git.ok(laptop, "rm", "-q", ".gitmodules")
     }
 
     private fun laptopRecords(libraryCommit: String) {

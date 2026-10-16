@@ -10,26 +10,24 @@ internal data class Submodule(val name: String, val path: String, val url: Strin
  * under modules/<name>, and its folder, where the parent records it, holds a `.git` file pointing there.
  */
 internal class Submodules(private val git: RepoGit) {
-    private val parentBranch by lazy { git.output("symbolic-ref", "--quiet", "--short", "HEAD").orEmpty() }
+    private val parentBranch by lazy { git.branch().orEmpty() }
     private val parentUrl by lazy {
         val remote = git.output("config", "branch.$parentBranch.remote") ?: "origin"
         git.output("config", "remote.$remote.url").orEmpty()
     }
+    private val declared = HashMap<String, List<Submodule>>()
 
     /** Those [commit]'s .gitmodules declares and that it records a commit for, leaving out any git would refuse. */
-    fun of(commit: String): List<Submodule> {
-        if (git.resolve("$commit:.gitmodules") == null) return emptyList()
-        // "<key>\n<value>" entries, with keys as submodule.<name>.<variable>; a name may hold dots
-        val variables = git.check("config", "--blob", "$commit:.gitmodules", "--null", "--list").stdout.paths()
-            .map { it.substringBefore('\n') to it.substringAfter('\n', "") }
-            .filter { (key) -> key.startsWith("submodule.") }
-            .groupBy({ (key) -> key.removePrefix("submodule.").substringBeforeLast('.') }, { (key, value) -> key.substringAfterLast('.') to value })
-        val recorded = git.check("ls-tree", "-r", "-z", commit).stdout.paths()
+    fun of(commit: String): List<Submodule> = declared.getOrPut(commit) {
+        if (git.resolve("$commit:.gitmodules") == null) return@getOrPut emptyList()
+        val variables = sections(git.check("config", "--blob", "$commit:.gitmodules", "--null", "--list").stdout.paths(), "submodule")
+        val paths = variables.values.mapNotNull { it["path"] }
+        if (paths.isEmpty()) return@getOrPut emptyList()
+        val recorded = git.check("ls-tree", "-z", commit, "--", *paths.toTypedArray()).stdout.paths()
             .filter { it.startsWith("${Change.GITLINK} ") }
             .associate { it.substringAfter('\t') to it.substringBefore('\t').split(' ')[2] }
 
-        val submodules = variables.mapNotNull { (name, entries) ->
-            val values = entries.toMap()
+        val submodules = variables.mapNotNull { (name, values) ->
             val path = values["path"] ?: return@mapNotNull null
             val url = values["url"]?.takeIf { !it.startsWith("-") }?.let { resolveUrl(parentUrl, it) } ?: return@mapNotNull null
             // A name becomes a folder in the git dir, so one climbing out of it is refused, as git refuses it
@@ -41,23 +39,21 @@ internal class Submodules(private val git: RepoGit) {
         }
         // As git refuses them, a name whose git dir would sit inside another's
         val names = submodules.map { it.name }
-        return submodules.filter { submodule -> names.none { submodule.name.startsWith("$it/") } }.sortedBy { it.path }
+        submodules.filter { submodule -> names.none { submodule.name.startsWith("$it/") } }.sortedBy { it.path }
     }
 
-    fun repo(submodule: Submodule) = Repo(git.repo.gitDir.resolve("modules/${submodule.name}"), git.repo.workTree.resolve(submodule.path))
+    fun repo(name: String, path: String) = Repo(git.repo.gitDir.resolve("modules/$name"), git.repo.workTree.resolve(path))
 
     /** The `.git` file that makes the folder the submodule's, for the parent's git to find it. */
-    fun pointer(submodule: Submodule) = git.repo.workTree.resolve("${submodule.path}/.git")
+    fun pointer(path: String) = git.repo.workTree.resolve("$path/.git")
 
-    fun pointerText(submodule: Submodule) = "gitdir: ${repo(submodule).gitDir.path}\n"
+    fun pointerText(name: String, path: String) = "gitdir: ${repo(name, path).gitDir.path}\n"
 
     /** Whether [pointer], a `.git` file, names a git dir inside this repo's, as only this app's own set-ups do. */
-    fun pointsIntoRepo(pointer: File): Boolean {
-        val target = pointer.readText().lineSequence().firstOrNull()?.removePrefix("gitdir: ") ?: return false
-        return (File(target).takeIf(File::isAbsolute) ?: pointer.parentFile.resolve(target)).canonicalPath.startsWith(git.repo.gitDir.canonicalPath + File.separator)
-    }
+    fun pointsIntoRepo(pointer: File) = gitDirOf(pointer)?.canonicalPath?.startsWith(git.repo.gitDir.canonicalPath + File.separator) == true
 
-    fun isSetUp(submodule: Submodule) = repo(submodule).gitDir.isDirectory && pointer(submodule).let { it.isFile && it.readText() == pointerText(submodule) }
+    fun isSetUp(name: String, path: String) =
+        repo(name, path).gitDir.isDirectory && pointer(path).let { it.isFile && it.readText() == pointerText(name, path) }
 
     companion object {
         private val SCP_LIKE = Regex("^[^/]+:")
@@ -80,3 +76,19 @@ internal class Submodules(private val git: RepoGit) {
         }
     }
 }
+
+/** The git dir a `.git` file names on its `gitdir:` line, as a submodule's or a separate git dir's folder holds one. */
+internal fun gitDirOf(dotGit: File): File? {
+    val target = dotGit.readText().lineSequence().firstOrNull()?.takeIf { it.startsWith("gitdir: ") }?.removePrefix("gitdir: ") ?: return null
+    return File(target).takeIf(File::isAbsolute) ?: dotGit.parentFile.resolve(target)
+}
+
+/**
+ * `config --null` entries ("<key>\n<value>") under `<section>.<subsection>.<variable>`, by subsection and variable.
+ * A subsection, such as a submodule's name, may hold dots.
+ */
+internal fun sections(entries: List<String>, section: String): Map<String, Map<String, String>> =
+    entries.map { it.substringBefore('\n') to it.substringAfter('\n', "") }
+        .filter { (key) -> key.startsWith("$section.") }
+        .groupBy({ (key) -> key.removePrefix("$section.").substringBeforeLast('.') }, { (key, value) -> key.substringAfterLast('.') to value })
+        .mapValues { (_, values) -> values.toMap() }

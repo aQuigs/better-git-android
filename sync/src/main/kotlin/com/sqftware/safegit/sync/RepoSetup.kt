@@ -71,9 +71,10 @@ class RepoSetup(private val git: Git, private val identity: Identity) {
         // A probe file the app was killed before deleting is never synced
         exclude.writeText("/$PROBE*\n")
 
-        val own = ownGitDir(folder.resolve(".git"), submodule)?.let { Own(it, folder) }
+        val dotGit = folder.resolve(".git")
+        val own = (if (dotGit.isDirectory) dotGit else dotGit.takeIf { submodule && it.isFile }?.let(::gitDirOf))?.let { Own(it, folder) }
         if (own != null && own.dir.isDirectory && own.head() != null) {
-            own.unusable(url, branch, onNoBranch = submodule)?.let { return Result.Failed(Problem.FOLDER_REPO, it) }
+            own.unusable(url, branch, submodule)?.let { return Result.Failed(Problem.FOLDER_REPO, it) }
             own.dir.resolve("info/exclude").takeIf { it.isFile }?.let { exclude.appendText(it.readText()) }
             repoGit.check(*TRUSTED, "fetch", "--quiet", "--no-recurse-submodules", own.dir.path, "HEAD")
             repoGit.check("update-ref", "refs/heads/$branch", "FETCH_HEAD")
@@ -84,22 +85,14 @@ class RepoSetup(private val git: Git, private val identity: Identity) {
         return Result.Connected(repoGit.repo)
     }
 
-    /** The git dir of [dotGit], a folder's `.git`: itself, or for a submodule, the one its `gitdir:` line names. */
-    private fun ownGitDir(dotGit: File, submodule: Boolean): File? = when {
-        dotGit.isDirectory -> dotGit
-        submodule && dotGit.isFile -> dotGit.readText().lineSequence().firstOrNull()?.takeIf { it.startsWith("gitdir: ") }
-            ?.removePrefix("gitdir: ")?.let { File(it).takeIf(File::isAbsolute) ?: dotGit.parentFile.resolve(it) }
-        else -> null
-    }
-
     /** The folder's own repo, read but never written. */
     private inner class Own(val dir: File, folder: File) {
         private val git = RepoGit(this@RepoSetup.git, Repo(dir, folder), identity)
 
         fun head() = output("rev-parse", "--verify", "--quiet", "HEAD^{commit}")
 
-        /** Why its commit is no place to start [branch] of [url] from, or null when it is one; [onNoBranch], a submodule's may be on none. */
-        fun unusable(url: String, branch: String, onNoBranch: Boolean): String? {
+        /** Why its commit is no place to start [branch] of [url] from, or null when it is one. */
+        fun unusable(url: String, branch: String, submodule: Boolean): String? {
             if (BUSY.any { dir.resolve(it).exists() } || check("ls-files", "--unmerged").isNotEmpty()) {
                 return "It is in the middle of a rebase, merge or cherry-pick. Finish or abort that in the app that started it."
             }
@@ -108,7 +101,7 @@ class RepoSetup(private val git: Git, private val identity: Identity) {
             }
             val local = output("symbolic-ref", "--quiet", "--short", "HEAD")
             if (local == null) {
-                if (!onNoBranch) return "It is not on a branch."
+                if (!submodule) return "It is not on a branch."
                 val ownUrl = output("config", "remote.origin.url")
                 return if (ownUrl?.let(::sameRepo) == sameRepo(url)) null else "It syncs with ${ownUrl ?: "no remote"}, not $url."
             }

@@ -43,6 +43,16 @@ internal class RepoGit(val cli: Git, val repo: Repo, val identity: Identity) {
     /** The branch's commit, or null before its first one. */
     fun head() = resolve("HEAD^{commit}")
 
+    /** The branch HEAD is on, or null when it is on none. */
+    fun branch() = output("symbolic-ref", "--quiet", "--short", "HEAD")
+
+    /** The remote-tracking ref [branch] syncs with, from config, which knows it before the branch's first commit. */
+    fun upstream(branch: String): String? {
+        val remote = output("config", "branch.$branch.remote") ?: return null
+        val merge = output("config", "branch.$branch.merge") ?: return null
+        return "refs/remotes/$remote/${merge.removePrefix("refs/heads/")}"
+    }
+
     /** The same git for another repo, such as a submodule. */
     fun at(repo: Repo) = RepoGit(cli, repo, identity)
 
