@@ -8,23 +8,32 @@ import java.io.File
 /** Who the tests' own git commands commit as, playing the other device. */
 val LAPTOP = Identity("Laptop", "laptop@example.com")
 
+/** Who the phone under test syncs as. */
+val PHONE = Identity("Phone", "phone@example.com")
+
 fun Git.ok(dir: File, vararg args: String): String {
     val result = run(dir, args.toList(), LAPTOP.environment)
     assertTrue("git ${args.joinToString(" ")}: ${result.stderr}", result.ok)
     return result.stdout.trim()
 }
 
-/** Clones the way the app does: the git dir in private storage, set for the case rules of the folder's storage. */
+/** Connects [workTree] to [from] the way the app does, with [RepoSetup], and checks out the remote's branch. */
 fun Git.splitClone(from: File, gitDir: File, workTree: File): Repo {
-    val repo = Repo(gitDir, workTree)
-    ok(gitDir.parentFile, "clone", "-q", "--no-checkout", "--separate-git-dir", gitDir.path, from.path, workTree.path)
-    workTree.resolve(".git").delete()
+    workTree.mkdirs()
+    val repo = (RepoSetup(this, LAPTOP).connect(from.path, gitDir, workTree) as RepoSetup.Result.Connected).repo
     val git = RepoGit(this, repo, LAPTOP)
-    val probe = workTree.resolve("CaseProbe").apply { writeText("") }
-    git.check("config", "core.ignorecase", workTree.resolve("caseprobe").exists().toString())
-    probe.delete()
-    if (git.head() != null) git.check("checkout", "-q")
+    git.check("fetch", "-q", "origin")
+    git.resolve("@{upstream}")?.let { upstream ->
+        git.check("update-ref", "HEAD", upstream)
+        git.check("checkout", "-q")
+    }
     return repo
+}
+
+/** Whether [dir]'s storage takes two names that differ only by case for one file. */
+fun ignoresCase(dir: File): Boolean {
+    val probe = dir.resolve("CaseProbe").apply { writeText("") }
+    return dir.resolve("caseprobe").exists().also { probe.delete() }
 }
 
 /** A git command as it reaches [Git.run]. */

@@ -859,7 +859,7 @@ abstract class SafeSyncContract(tempParent: File? = null, workTreeParent: File? 
     private fun asked(result: SyncResult) = (result as? SyncResult.Choose)?.choices ?: throw AssertionError("Not a choice: $result")
 
     private fun sync(git: Git = this.git, repo: Repo = phone, choices: Map<Choice, Keep> = emptyMap()) =
-        SafeSync(git, Identity("Phone", "phone@example.com"), device = "Pixel", now = { 1000 }).sync(repo, choices = choices)
+        SafeSync(git, PHONE, device = "Pixel", now = { 1000 }).sync(repo, choices = choices)
 
     /** Both sides change the second line of notes.md; returns the remote's commit, which has the laptop's change. */
     private fun conflictInNotes(): String {

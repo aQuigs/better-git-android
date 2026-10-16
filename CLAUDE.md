@@ -17,6 +17,7 @@ Git Sync (ViscousPot/GitSync, Flutter + libgit2) loses work: its pull merges and
 - **Engine boundary:** sync logic talks to a `Git` interface in plain Kotlin, and the CLI runner is one implementation of it.
 - **Storage:** repos live in shared storage (e.g. an Obsidian vault in `Documents/`) under the All-files access permission (`MANAGE_EXTERNAL_STORAGE`), declared as core functionality on Play. SAF cannot back git (no paths, lstat or locking). To keep object and index I/O off the slow FUSE layer, the repo's git dir sits in app-private storage and points at the shared worktree, with `core.untrackedCache` on. On the emulator with the notes repo (about 2,800 files), this split layout brings `status` from 36 ms to 9 ms, and committing 20 edits from 0.4–0.65 s to 0.14 s, compared with the whole repo in shared storage.
 - **Auth:** ease of use first. GitHub sign-in uses the OAuth device flow, which needs no client secret or backend. The token lives in the Android Keystore and reaches git through `GIT_CONFIG_COUNT`/`http.extraHeader`, never argv or a config file. HTTPS only to start; SSH (a bundled ssh client) comes later if needed.
+- **Connecting a folder:** `RepoSetup` makes the private git dir and sets the folder storage's rules (`core.ignorecase`, `core.symlinks` probed there; no file mode). A folder with a `.git` of its own (as Git Sync leaves) starts from that repo's commit, but only when it is at rest, not sparse, and on the same remote branch; otherwise connecting is refused, since the first sync would push markers, deletions or another repo's files.
 - **Sync is manual:** a button, nothing in the background yet. A sync takes seconds, so it runs as expedited WorkManager work, not a foreground service.
 
 ## Sync must never lose data
@@ -47,8 +48,8 @@ Git Sync (ViscousPot/GitSync, Flutter + libgit2) loses work: its pull merges and
 - **Residual window:** a notes app saving a file in the instant between `FolderUpdate`'s last check and its rename would lose that save.
 - **Renamed only by case on the phone:** git with `core.ignorecase` never records it, so a remote change to that file blocks the sync (`FOLDER_BLOCKED`) until the name matches again. Nothing is lost, but the UI should explain it.
 - **Dropped commits:** commits the remote dropped with a force push leave the phone's branch too (kept in the backup ref). The UI should say so.
-- **Repo creation:** git probes `core.ignorecase`, `core.symlinks` and `core.filemode` in the private git dir, so creating a repo must set them for shared storage (case-insensitive, no symlinks, no exec bit). Backup refs are never pruned yet.
-- **Cancellation:** `CliGit` cannot stop a running git yet. When sync becomes cancellable, kill git cleanly. A sync removes an `index.lock` it finds at the start, which is safe only while syncs of a repo never overlap.
+- **Backup refs** are never pruned yet.
+- **Cancellation:** `CliGit` cannot stop a running git yet. When sync becomes cancellable, kill git cleanly. A sync removes an `index.lock` it finds at the start, which is safe only while syncs of a repo never overlap: `SyncWorker` holds a per-repo lock on the thread running git, since a stopped worker's git runs on while WorkManager starts the work again.
 - **Play review:** the All-files access declaration could be rejected.
 - **FUSE:** the first `add` of a whole vault is slow (4 s for the notes repo, split layout). Measure on a real phone too.
 
@@ -64,6 +65,7 @@ scripts/emulator-lock.sh ./gradlew connectedDebugAndroidTest  # Compose UI tests
 scripts/emulator-lock.sh scripts/run.sh  # install the debug build and open it (VARIANT=Release for the minified build)
 scripts/screenshot.sh [name]         # adb screencap → screenshots/<name>.png (gitignored)
 scripts/pr-media.sh <file> <caption>... # upload shots as GitHub attachments, print the PR body's media table
+scripts/emulator-lock.sh scripts/e2e.sh  # after assembleDebug: the app through connect, conflict and choice against a repo the Mac serves
 ./gradlew :app:fetchGit --rerun      # take Termux's newest git build; a build otherwise keeps the one it fetched first
 ```
 
@@ -72,10 +74,15 @@ scripts/pr-media.sh <file> <caption>... # upload shots as GitHub attachments, pr
 ```text
 sync/src/main/kotlin/com/sqftware/safegit/
 ├── git/                 # the Git interface and CliGit, which runs any git executable
-└── sync/                # SafeSync (one sync: commit, fetch, merge, move the folder, push) and FolderUpdate
+└── sync/                # SafeSync (one sync: commit, fetch, merge, move the folder, push), FolderUpdate, RepoSetup
 app/src/main/kotlin/com/sqftware/safegit/
-├── MainActivity.kt
-└── git/BundledGit.kt    # sets up the git binaries shipped as native libraries
+├── MainActivity.kt      # all-files access, then the repo list or the add screen
+├── Services.kt          # the app's singletons: repo store, sync records, bundled git
+├── git/BundledGit.kt    # sets up the git binaries shipped as native libraries
+├── repos/               # the connected repos, saved as JSON, and Connector, which adds one
+├── storage/             # all-files access, folder picker URI → path, atomic JSON files
+├── work/                # each sync as WorkManager work, and its saved result and choices
+└── ui/                  # Compose screens, tested with fake data
 scripts/fetch-git.sh     # downloads Termux's git and lays it out as jniLibs and assets
 ```
 

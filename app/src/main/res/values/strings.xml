@@ -1,4 +1,50 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">SafeGit</string>
+
+    <string name="access_title">Let SafeGit reach your notes</string>
+    <string name="access_body">SafeGit syncs folders such as an Obsidian vault in your phone\'s storage. Git needs to work with them as real files, which takes the \"All files access\" permission.</string>
+    <string name="access_grant">Allow access</string>
+
+    <string name="repos_empty">Connect a folder to a git repo to start syncing it.</string>
+    <string name="repos_add">Add a repo</string>
+    <string name="sync">Sync</string>
+    <string name="sync_with_choices">Sync with these choices</string>
+
+    <string name="state_never">Not synced yet</string>
+    <string name="state_running">Syncing…</string>
+    <string name="state_up_to_date">Up to date</string>
+    <string name="state_synced">Synced</string>
+    <string name="state_conflict">Both sides changed the same lines. Each of these files now holds both versions, between lines starting with &lt;&lt;&lt;&lt;&lt;&lt;&lt; and &gt;&gt;&gt;&gt;&gt;&gt;&gt;. Edit them to keep what you want, then sync. Nothing is pushed until then.</string>
+    <string name="state_choose">These changes can\'t be combined in one file. Choose which version to keep; nothing has changed yet.</string>
+    <string name="side_file">has it</string>
+    <string name="side_none">deleted it</string>
+    <string name="choice_both">Changed on this phone and on the remote</string>
+    <string name="choice_sides">This phone %1$s, the remote %2$s</string>
+    <string name="keep_local">Keep this phone\'s</string>
+    <string name="keep_remote">Keep the remote\'s</string>
+
+    <string name="problem_not_on_branch">The repo isn\'t on a branch.</string>
+    <string name="problem_no_upstream">The branch has no remote branch to sync with.</string>
+    <string name="problem_fetch">Couldn\'t get the remote\'s changes.</string>
+    <string name="problem_push">Couldn\'t send changes to the remote.</string>
+    <string name="problem_remote_kept_changing">The remote kept changing during the sync. Try again.</string>
+    <string name="problem_folder_kept_changing">Files kept changing during the sync. Try again.</string>
+    <string name="problem_folder_blocked">These files are in the way, and SafeGit won\'t overwrite them:</string>
+    <string name="problem_folder_write">Couldn\'t write the folder; it was left as it was.</string>
+    <string name="problem_folder_repo">The folder has a git repo of its own that SafeGit can\'t start from.</string>
+    <string name="problem_git">Git stopped unexpectedly.</string>
+
+    <string name="add_title">Add a repo</string>
+    <string name="add_url">Repo URL</string>
+    <string name="add_url_hint">https://github.com/you/notes.git</string>
+    <string name="add_folder">Choose folder</string>
+    <string name="add_folder_none">No folder chosen</string>
+    <string name="add_folder_explain">An empty folder gets the repo\'s files. A folder that already has notes keeps them, and they merge with the repo\'s on the first sync.</string>
+    <string name="add_connect">Connect</string>
+    <string name="add_connecting">Connecting…</string>
+    <string name="add_password_in_url">Leave the password or token out of the URL. Sign-in comes separately.</string>
+    <string name="add_folder_overlaps">This folder is, holds or sits inside a folder that is already connected.</string>
+    <string name="add_folder_unusable">Choose a folder on this phone\'s storage.</string>
+    <string name="cancel">Cancel</string>
 </resources>
