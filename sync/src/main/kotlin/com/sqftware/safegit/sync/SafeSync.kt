@@ -57,6 +57,9 @@ data class Choice(val path: String, val local: String?, val remote: String?)
 /** Which side's version of a path to keep when the two cannot be combined. */
 enum class Keep { LOCAL, REMOTE }
 
+/** What a sync is doing, for a user waiting on it: committing on a large shared folder or a slow network can take a while. */
+enum class Step { COMMIT, FETCH, MERGE, UPDATE_FOLDER, PUSH }
+
 enum class Problem {
     NOT_ON_BRANCH,
     NO_UPSTREAM,
@@ -93,15 +96,26 @@ class SafeSync(
 ) {
     private val message = "Changes from $device"
 
-    fun sync(repo: Repo, credentials: Credentials = Credentials.NONE, choices: Map<Choice, Keep> = emptyMap()): SyncResult = try {
-        Session(RepoGit(git, repo, identity), credentials, choices).sync()
+    /** Calls [step] as it starts each step, on the thread running the sync. */
+    fun sync(
+        repo: Repo,
+        credentials: Credentials = Credentials.NONE,
+        choices: Map<Choice, Keep> = emptyMap(),
+        step: (Step) -> Unit = {},
+    ): SyncResult = try {
+        Session(RepoGit(git, repo, identity), credentials, choices, step).sync()
     } catch (e: GitFailure) {
         SyncResult.Failed(Problem.GIT, e.message.orEmpty())
     } catch (e: IOException) {
         SyncResult.Failed(Problem.FOLDER_WRITE, e.message.orEmpty())
     }
 
-    private inner class Session(private val git: RepoGit, private val credentials: Credentials, private val choices: Map<Choice, Keep>) {
+    private inner class Session(
+        private val git: RepoGit,
+        private val credentials: Credentials,
+        private val choices: Map<Choice, Keep>,
+        private val step: (Step) -> Unit,
+    ) {
         private val folder = FolderUpdate(git)
         private val markers = Markers(device)
         private val held = HeldConflict(git, markers)
@@ -129,6 +143,7 @@ class SafeSync(
                 if (retry != Problem.FOLDER_KEPT_CHANGING) {
                     stageLocalChanges().takeIf { it.isNotEmpty() }?.let { return SyncResult.Conflict(it) }
                     commitStaged()
+                    step(Step.FETCH)
                     val fetch = git.run("fetch", "--quiet", remote, environment = credentials.environment())
                     if (!fetch.ok) return fetch.failed(Problem.FETCH)
                 }
@@ -140,6 +155,7 @@ class SafeSync(
                 var pushing = ahead
 
                 if (behind > 0 || base?.rewound == true) {
+                    step(Step.MERGE)
                     val combined = if (base == null) Combined.Commit(upstreamHead!!) else combine(upstreamHead!!, base.commit)
                     val target = when (combined) {
                         is Combined.Choose -> return SyncResult.Choose(combined.choices)
@@ -150,6 +166,7 @@ class SafeSync(
                         git.check("update-ref", "refs/safegit/backup/${now()}", head!!)
                     }
 
+                    step(Step.UPDATE_FOLDER)
                     when (val moved = folder.move(from = head ?: git.emptyTree, to = target)) {
                         FolderUpdate.Result.Done -> {
                             if (combined is Combined.Marked) return SyncResult.Conflict(combined.paths)
@@ -172,6 +189,7 @@ class SafeSync(
                     return if (pulled == 0) SyncResult.UpToDate else SyncResult.Synced(pulled, pushed = 0)
                 }
 
+                step(Step.PUSH)
                 val push = git.run("push", "--porcelain", remote, "HEAD:$merge", environment = credentials.environment())
                 if (push.ok) {
                     return SyncResult.Synced(pulled, pushed = pushing)
@@ -189,6 +207,7 @@ class SafeSync(
          * Those are never committed, whatever their names now: the user may have renamed a file before resolving it.
          */
         private fun stageLocalChanges(): List<String> {
+            step(Step.COMMIT)
             git.check("add", "--all")
             val candidates = git.check("diff", "--cached", "--name-only", "--no-renames", "-z", "-G", markers.pattern).stdout.paths()
             return candidates.filter { markerCount(":$it") > (if (git.head() == null) 0 else markerCount("HEAD:$it")) }

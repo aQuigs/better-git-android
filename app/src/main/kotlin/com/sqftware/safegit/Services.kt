@@ -16,6 +16,7 @@ import com.sqftware.safegit.repos.SavedRepo
 import com.sqftware.safegit.sync.Identity
 import com.sqftware.safegit.sync.Repo
 import com.sqftware.safegit.work.SyncRecords
+import com.sqftware.safegit.work.SyncSteps
 import com.sqftware.safegit.work.Syncer
 import com.sqftware.safegit.work.WorkSyncer
 import kotlinx.coroutines.CoroutineScope
@@ -45,7 +46,8 @@ class Services private constructor(context: Context) {
         scope,
     )
     val accountRepos = AccountRepos(GitHubRepoDirectory(signIn::token), signIn.state.map { it is SignIn.State.SignedIn }, scope)
-    val syncer: Syncer = WorkSyncer(context, repos, records, scope)
+    val steps = SyncSteps()
+    val syncer: Syncer = WorkSyncer(context, repos, records, steps, scope)
 
     // Connecting commits nothing, so who it runs as never shows
     val connector = Connector({ git }, Identity("SafeGit", "safegit@users.noreply.github.com"), signIn::credentials, repos, syncer, ::gitDir, scope)

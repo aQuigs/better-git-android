@@ -17,6 +17,7 @@ import com.sqftware.safegit.sync.Choice
 import com.sqftware.safegit.sync.Keep
 import com.sqftware.safegit.sync.Problem
 import com.sqftware.safegit.sync.SafeSync
+import com.sqftware.safegit.sync.Step
 import com.sqftware.safegit.sync.SyncResult
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -29,9 +30,13 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.concurrent.ConcurrentHashMap
 
-/** Where a repo's sync stands: running, or the last one's result. */
+/** Where a repo's sync stands: waiting to start, running, or the last one's result. */
 sealed interface SyncState {
-    data object Running : SyncState
+    /** Asked for, but Android has not started it yet. */
+    data object Waiting : SyncState
+
+    /** Running; [step] is null until the sync reports its first. */
+    data class Running(val step: Step?) : SyncState
 
     data class Finished(val result: SyncResult) : SyncState
 }
@@ -47,14 +52,24 @@ interface Syncer {
 /**
  * Runs each sync as WorkManager work, unique per repo, and expedited, since it takes seconds and the user is waiting.
  */
-class WorkSyncer(context: Context, repos: RepoStore, private val records: SyncRecords, private val scope: CoroutineScope) : Syncer {
+class WorkSyncer(
+    context: Context,
+    repos: RepoStore,
+    private val records: SyncRecords,
+    steps: SyncSteps,
+    private val scope: CoroutineScope,
+) : Syncer {
     private val work = WorkManager.getInstance(context)
 
     // WorkManager only says what is running: it prunes finished work after a day, and the records keep every result
-    override val states: Flow<Map<String, SyncState>> = combine(repos.all, work.getWorkInfosByTagFlow(TAG)) { saved, infos ->
-        val running = infos.filter { !it.state.isFinished }.mapNotNull { it.repoId }.toSet()
+    override val states: Flow<Map<String, SyncState>> = combine(repos.all, work.getWorkInfosByTagFlow(TAG), steps.running) { saved, infos, running ->
+        val waiting = infos.filter { !it.state.isFinished }.mapNotNull { it.repoId }.toSet()
         saved.mapNotNull { repo ->
-            val state = if (repo.id in running) SyncState.Running else records.result(repo.id)?.let(SyncState::Finished)
+            val state = when (repo.id) {
+                in running -> SyncState.Running(running[repo.id])
+                in waiting -> SyncState.Waiting
+                else -> records.result(repo.id)?.let(SyncState::Finished)
+            }
             state?.let { repo.id to it }
         }.toMap()
     }.distinctUntilChanged().flowOn(Dispatchers.IO)
@@ -90,14 +105,19 @@ class SyncWorker(context: Context, params: WorkerParameters) : CoroutineWorker(c
         // Unique work is not enough: a stopped worker's sync runs on, since git cannot be cancelled, while WorkManager
         // starts the same work again. The lock is held by the thread running git, so the rerun waits for it.
         synchronized(locks.computeIfAbsent(id) { Any() }) {
-            val result = try {
-                SafeSync(services.git, services.signIn.identity(services.device), services.device)
-                    .sync(services.repo(saved), services.signIn.credentials(), services.records.takeChoices(id))
-            } catch (e: Exception) {
-                // Shown like any other failure rather than leaving the last result up as if nothing had happened
-                SyncResult.Failed(Problem.GIT, e.toString())
+            services.steps.start(id)
+            try {
+                val result = try {
+                    SafeSync(services.git, services.signIn.identity(services.device), services.device)
+                        .sync(services.repo(saved), services.signIn.credentials(), services.records.takeChoices(id)) { services.steps.step(id, it) }
+                } catch (e: Exception) {
+                    // Shown like any other failure rather than leaving the last result up as if nothing had happened
+                    SyncResult.Failed(Problem.GIT, e.toString())
+                }
+                services.records.saveResult(id, result)
+            } finally {
+                services.steps.end(id)
             }
-            services.records.saveResult(id, result)
         }
         Result.success()
     }

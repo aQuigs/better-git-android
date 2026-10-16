@@ -10,6 +10,7 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.sqftware.safegit.repos.SavedRepo
 import com.sqftware.safegit.sync.Choice
 import com.sqftware.safegit.sync.Keep
+import com.sqftware.safegit.sync.Step
 import com.sqftware.safegit.sync.SyncResult
 import com.sqftware.safegit.work.SyncState
 import org.junit.Assert.assertEquals
@@ -37,9 +38,18 @@ class ReposScreenTest {
     }
 
     @Test
-    fun cannotSyncWhileSyncing() {
-        compose.setContent { ReposScreen(listOf(RepoRow(vault, SyncState.Running)), onSync = { _, _ -> }, onAdd = {}) }
+    fun saysWhichStepTheSyncIsOn() {
+        compose.setContent { ReposScreen(listOf(RepoRow(vault, SyncState.Running(Step.COMMIT))), onSync = { _, _ -> }, onAdd = {}) }
 
+        compose.onNodeWithText("Committing this phone's changes…").assertExists()
+        compose.onNodeWithText("Sync").assertIsNotEnabled()
+    }
+
+    @Test
+    fun cannotSyncWhileWaitingToStart() {
+        compose.setContent { ReposScreen(listOf(RepoRow(vault, SyncState.Waiting)), onSync = { _, _ -> }, onAdd = {}) }
+
+        compose.onNodeWithText("Waiting for Android to start the sync…").assertExists()
         compose.onNodeWithText("Sync").assertIsNotEnabled()
     }
 
