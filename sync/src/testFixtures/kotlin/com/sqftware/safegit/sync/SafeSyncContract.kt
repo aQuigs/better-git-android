@@ -472,9 +472,7 @@ abstract class SafeSyncContract(tempParent: File? = null, workTreeParent: File? 
 
         assertThrows(Killed::class.java) { sync(git.dyingAtTheLastStep()) }
 
-        val steps = mutableListOf<Step>()
-        assertEquals(SyncResult.UpToDate, sync(step = steps::add))
-        assertEquals(listOf(Step.UPDATE_FOLDER, Step.COMMIT, Step.FETCH), steps)
+        assertEquals(SyncResult.UpToDate, sync())
         assertEquals("ONE\ntwo\nthree\n", files.read("notes.md"))
         assertEquals("from the laptop", files.read("laptop.md"))
         assertEquals(git.ok(remote, "rev-parse", "main"), phoneGit("rev-parse", "HEAD"))

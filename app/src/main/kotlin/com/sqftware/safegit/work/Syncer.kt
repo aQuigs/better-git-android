@@ -35,7 +35,7 @@ sealed interface SyncState {
     /** Asked for, but Android has not started it yet. */
     data object Waiting : SyncState
 
-    /** Started; [step] is null until the sync reports its first. */
+    /** Running; [step] is null until the sync reports its first. */
     data class Running(val step: Step?) : SyncState
 
     data class Finished(val result: SyncResult) : SyncState
@@ -52,14 +52,24 @@ interface Syncer {
 /**
  * Runs each sync as WorkManager work, unique per repo, and expedited, since it takes seconds and the user is waiting.
  */
-class WorkSyncer(context: Context, repos: RepoStore, private val records: SyncRecords, private val scope: CoroutineScope) : Syncer {
+class WorkSyncer(
+    context: Context,
+    repos: RepoStore,
+    private val records: SyncRecords,
+    steps: SyncSteps,
+    private val scope: CoroutineScope,
+) : Syncer {
     private val work = WorkManager.getInstance(context)
 
     // WorkManager only says what is running: it prunes finished work after a day, and the records keep every result
-    override val states: Flow<Map<String, SyncState>> = combine(repos.all, work.getWorkInfosByTagFlow(TAG)) { saved, infos ->
-        val unfinished = infos.filter { !it.state.isFinished }.associateBy { it.repoId }
+    override val states: Flow<Map<String, SyncState>> = combine(repos.all, work.getWorkInfosByTagFlow(TAG), steps.running) { saved, infos, running ->
+        val waiting = infos.filter { !it.state.isFinished }.mapNotNull { it.repoId }.toSet()
         saved.mapNotNull { repo ->
-            val state = unfinished[repo.id]?.let(::syncState) ?: records.result(repo.id)?.let(SyncState::Finished)
+            val state = when (repo.id) {
+                in running -> SyncState.Running(running[repo.id])
+                in waiting -> SyncState.Waiting
+                else -> records.result(repo.id)?.let(SyncState::Finished)
+            }
             state?.let { repo.id to it }
         }.toMap()
     }.distinctUntilChanged().flowOn(Dispatchers.IO)
@@ -76,13 +86,6 @@ class WorkSyncer(context: Context, repos: RepoStore, private val records: SyncRe
                 .build()
             work.enqueueUniqueWork("sync-${repo.id}", ExistingWorkPolicy.KEEP, request)
         }
-    }
-
-    private fun syncState(info: WorkInfo) = when {
-        info.state == WorkInfo.State.RUNNING -> SyncState.Running(info.progress.getString(SyncWorker.STEP).let { name -> Step.entries.find { it.name == name } })
-        // A stopped worker's git runs on while the work waits to be run again, so it has started all the same
-        info.runAttemptCount > 0 -> SyncState.Running(null)
-        else -> SyncState.Waiting
     }
 
     private val WorkInfo.repoId get() = tags.firstOrNull { it.startsWith(REPO_TAG) }?.removePrefix(REPO_TAG)
@@ -102,23 +105,25 @@ class SyncWorker(context: Context, params: WorkerParameters) : CoroutineWorker(c
         // Unique work is not enough: a stopped worker's sync runs on, since git cannot be cancelled, while WorkManager
         // starts the same work again. The lock is held by the thread running git, so the rerun waits for it.
         synchronized(locks.computeIfAbsent(id) { Any() }) {
-            val result = try {
-                SafeSync(services.git, services.signIn.identity(services.device), services.device)
-                    .sync(services.repo(saved), services.signIn.credentials(), services.records.takeChoices(id)) { step ->
-                        setProgressAsync(workDataOf(STEP to step.name))
-                    }
-            } catch (e: Exception) {
-                // Shown like any other failure rather than leaving the last result up as if nothing had happened
-                SyncResult.Failed(Problem.GIT, e.toString())
+            services.steps.start(id)
+            try {
+                val result = try {
+                    SafeSync(services.git, services.signIn.identity(services.device), services.device)
+                        .sync(services.repo(saved), services.signIn.credentials(), services.records.takeChoices(id)) { services.steps.step(id, it) }
+                } catch (e: Exception) {
+                    // Shown like any other failure rather than leaving the last result up as if nothing had happened
+                    SyncResult.Failed(Problem.GIT, e.toString())
+                }
+                services.records.saveResult(id, result)
+            } finally {
+                services.steps.end(id)
             }
-            services.records.saveResult(id, result)
         }
         Result.success()
     }
 
     companion object {
         const val REPO = "repo"
-        const val STEP = "step"
         private val locks = ConcurrentHashMap<String, Any>()
     }
 }

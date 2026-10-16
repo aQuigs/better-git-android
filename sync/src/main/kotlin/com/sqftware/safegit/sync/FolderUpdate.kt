@@ -41,9 +41,9 @@ internal class FolderUpdate(private val git: RepoGit) {
 
     /**
      * Deals with a move a killed sync left recorded: finished once the branch has moved, redone or put back while it
-     * has not, calling [moving] first. Returns a failure only when the folder could not be put right.
+     * has not. Returns a failure only when the folder could not be put right.
      */
-    fun resume(moving: () -> Unit = {}): Result.WriteFailed? {
+    fun resume(): Result.WriteFailed? {
         temp.delete()
         val from = git.resolve(FROM) ?: return null
         val to = git.resolve(TO)
@@ -51,7 +51,6 @@ internal class FolderUpdate(private val git: RepoGit) {
             finish()
             return null
         }
-        moving()
         return Move(from, to).run(resuming = true) as? Result.WriteFailed
     }
 
