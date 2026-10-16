@@ -93,9 +93,10 @@ private fun Repos(services: Services, onAdd: () -> Unit) {
     val account by services.signIn.state.collectAsState()
     val context = LocalContext.current
     ReposScreen(
-        rows = repos?.map { RepoRow(it, states[it.id]) } ?: return,
+        rows = repos?.map { RepoRow(it, states[it.id], services.signIn.canSignInAgain(it.url, account)) } ?: return,
         onSync = services.syncer::sync,
         onAdd = onAdd,
+        onSignIn = services.signIn::signInAgain,
         header = {
             AccountCard(
                 account,

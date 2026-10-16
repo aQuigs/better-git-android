@@ -38,7 +38,7 @@ class RepoSetup(private val git: Git, private val identity: Identity) {
 
         // Asked before anything is made, so a wrong URL or a missing sign-in leaves nothing to clean up
         val head = git.run(gitDir.parentFile, listOf("ls-remote", "--symref", url, "HEAD"), identity.environment + credentials.environment())
-        if (!head.ok) return Result.Failed(Problem.FETCH, head.stderr.trim())
+        if (!head.ok) return Result.Failed(head.remoteProblem(Problem.FETCH), head.stderr.trim())
         // "ref: refs/heads/<branch>\tHEAD", or nothing from a repo without commits
         val upstream = branch ?: head.stdout.lines().firstOrNull { it.startsWith("ref: ") }?.substringAfter("ref: ")?.substringBefore("\t")
             ?.removePrefix("refs/heads/") ?: DEFAULT_BRANCH

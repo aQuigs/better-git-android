@@ -20,6 +20,7 @@ private fun problemText(problem: Problem) = when (problem) {
     Problem.NO_UPSTREAM -> R.string.problem_no_upstream
     Problem.FETCH -> R.string.problem_fetch
     Problem.PUSH -> R.string.problem_push
+    Problem.SIGN_IN -> R.string.problem_sign_in
     Problem.REMOTE_KEPT_CHANGING -> R.string.problem_remote_kept_changing
     Problem.FOLDER_KEPT_CHANGING -> R.string.problem_folder_kept_changing
     Problem.FOLDER_BLOCKED -> R.string.problem_folder_blocked

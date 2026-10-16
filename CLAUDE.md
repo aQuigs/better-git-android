@@ -59,7 +59,7 @@ Git Sync (ViscousPot/GitSync, Flutter + libgit2) loses work: its pull merges and
 - **Dropped commits:** commits the remote dropped with a force push leave the phone's branch too (kept in the backup ref). The UI should say so.
 - **Backup refs** are never pruned yet.
 - **Cancellation:** `CliGit` cannot stop a running git yet. When sync becomes cancellable, kill git cleanly. A sync removes an `index.lock` it finds at the start, which is safe only while syncs of a repo never overlap: `SyncWorker` holds a per-repo lock on the thread running git, since a stopped worker's git runs on while WorkManager starts the work again.
-- **Revoked token:** a token revoked on GitHub still shows as signed in, and its header makes every github.com fetch fail, public repos too. The sync shows the failure; the UI should say to sign in again.
+- **Revoked token:** a token revoked on GitHub still shows as signed in, and its header makes every github.com fetch fail, public repos too. A sync or connect the remote refuses for want of a sign-in ends `SIGN_IN` (git's "could not read Username"), and the repo card offers to sign in again. GitHub keeps 10 tokens per account and app, so an 11th sign-in anywhere revokes the oldest.
 - **Play review:** the All-files access declaration could be rejected.
 - **FUSE:** the first `add` of a whole vault is slow (4 s for the notes repo, split layout). Measure on a real phone too.
 

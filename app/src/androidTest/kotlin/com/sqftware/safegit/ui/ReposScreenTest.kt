@@ -26,6 +26,7 @@ class ReposScreenTest {
     val compose = createComposeRule()
 
     private val vault = SavedRepo("1", "https://github.com/me/notes.git", File("/storage/emulated/0/Documents/notes"))
+    private val refused = SyncState.Finished(SyncResult.Failed(Problem.SIGN_IN, "fatal: could not read Username for 'https://github.com': terminal prompts disabled"))
 
     @Test
     fun syncsARepo() {
@@ -72,6 +73,25 @@ class ReposScreenTest {
         compose.onNodeWithText("The rest synced, but SafeGit left these submodules as they were:").assertExists()
         compose.onNodeWithText("lib: It is not on a branch.").assertExists()
         compose.onNodeWithText("Sync").assertIsEnabled()
+    }
+
+    @Test
+    fun offersToSignInAgainWhenTheRemoteRefusesTheSignIn() {
+        var signIns = 0
+        compose.setContent { ReposScreen(listOf(RepoRow(vault, refused, canSignIn = true)), onSync = { _, _ -> }, onAdd = {}, onSignIn = { signIns++ }) }
+
+        compose.onNodeWithText("The remote refused the sign-in, or the repo doesn't exist.").assertExists()
+        compose.onNodeWithText("Sign in again").performClick()
+
+        assertEquals(1, signIns)
+    }
+
+    @Test
+    fun offersNoSignInThatCannotHelp() {
+        compose.setContent { ReposScreen(listOf(RepoRow(vault, refused, canSignIn = false)), onSync = { _, _ -> }, onAdd = {}, onSignIn = {}) }
+
+        compose.onNodeWithText("The remote refused the sign-in, or the repo doesn't exist.").assertExists()
+        compose.onNodeWithText("Sign in again").assertDoesNotExist()
     }
 
     @Test

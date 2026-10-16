@@ -34,6 +34,8 @@
     <string name="problem_no_upstream">The branch has no remote branch to sync with.</string>
     <string name="problem_fetch">Couldn\'t get the remote\'s changes.</string>
     <string name="problem_push">Couldn\'t send changes to the remote.</string>
+    <string name="problem_sign_in">The remote refused the sign-in, or the repo doesn\'t exist.</string>
+    <string name="sign_in_again">Sign in again</string>
     <string name="problem_remote_kept_changing">The remote kept changing during the sync. Try again.</string>
     <string name="problem_folder_kept_changing">Files kept changing during the sync. Try again.</string>
     <string name="problem_folder_blocked">These files are in the way, and SafeGit won\'t overwrite them:</string>
