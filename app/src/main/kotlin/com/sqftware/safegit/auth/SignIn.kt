@@ -114,8 +114,9 @@ class SignIn(
         signIn()
     }
 
-    /** Whether [signInAgain] can help a remote at [url] that refused the sign-in: the token goes there, and none is under way. */
-    fun canSignInAgain(url: String) = flow != null && current.value != State.Loading && !signingIn() && url.startsWith(GITHUB)
+    /** Whether [signInAgain] can help a remote at [url] that refused the sign-in: the token goes there, and in [state] none is under way. */
+    fun canSignInAgain(url: String, state: State) =
+        url.startsWith(GITHUB) && (state is State.SignedIn || state == State.SignedOut || state is State.Failed)
 
     private fun signingIn() = current.value == State.Starting || current.value is State.Waiting
 

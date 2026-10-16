@@ -61,8 +61,8 @@ class SignInTest {
         val signIn = signIn(FakeFlow(Poll.Granted("tok")))
         settle(signIn)
 
-        assertTrue(signIn.canSignInAgain("https://github.com/octo/notes.git"))
-        assertFalse(signIn.canSignInAgain("https://gitlab.com/octo/notes.git"))
+        assertTrue(signIn.canSignInAgain("https://github.com/octo/notes.git", signIn.state.value))
+        assertFalse(signIn.canSignInAgain("https://gitlab.com/octo/notes.git", signIn.state.value))
         signIn.signInAgain()
 
         assertEquals(SignIn.State.SignedIn(octo), signIn.state.first { it is SignIn.State.SignedIn })
@@ -81,7 +81,7 @@ class SignInTest {
         signIn.signInAgain()
 
         assertEquals(Session(octo, "old"), store.session)
-        assertFalse(signIn.canSignInAgain("https://github.com/octo/notes.git"))
+        assertFalse(signIn.canSignInAgain("https://github.com/octo/notes.git", signIn.state.value))
         polled.complete(Unit)
         signIn.state.first { it is SignIn.State.SignedIn }
         assertEquals(Session(octo, "tok"), store.session)
