@@ -24,7 +24,7 @@ internal class SubmoduleSync(
     private val submodules = Submodules(git)
     private val records: MutableMap<String, MutableMap<String, String>> by lazy {
         // Every submodule set up here has its git dir there, so a repo with none costs no git
-        val any = git.repo.gitDir.resolve("modules").list().orEmpty().any { !it.endsWith(OLD) }
+        val any = git.repo.gitDir.resolve("modules").list().orEmpty().isNotEmpty()
         val read = if (any) git.output("config", "--null", "--get-regexp", "^$SET_UP\\.")?.paths().orEmpty() else emptyList()
         sections(read, SET_UP).mapValues { (_, values) -> values.toMutableMap() }.toMutableMap()
     }
@@ -39,9 +39,12 @@ internal class SubmoduleSync(
      */
     fun bringUp(onlyMoved: Boolean = false): SyncResult? {
         ready.clear()
-        problems.clear()
+        // Those it passes over keep what the last full pass found
+        if (!onlyMoved) problems.clear()
         declared = git.head()?.let { submodules.of(it) }.orEmpty()
         retireUndeclared(declared)?.let { return it }
+        val known = declared.map { it.path } + records.values.mapNotNull { it[PATH] }
+        problems.keys.retainAll { path -> known.any { path == it || path.startsWith("$it/") } }
 
         for (submodule in declared) {
             val record = records[submodule.name]
@@ -82,9 +85,11 @@ internal class SubmoduleSync(
         }
         val leaving = records.filter { (name, record) -> after.none { it.name == name && it.path == record[PATH] } }.values.mapNotNull { it[PATH] }
         retireUndeclared(after)?.let { return it }
-        // One still in its folder would have the repo's files written in among its own
-        val blocking = leaving.filter { it in problems && git.output("ls-tree", "--name-only", to, "--", it).orEmpty().isNotEmpty() }
-        return if (blocking.isEmpty()) null else SyncResult.Failed(Problem.SUBMODULE, blocking.joinToString("\n") { "$it: ${problems[it]}" })
+        // One still in its folder would have the repo's own files written in among its own; a submodule there would not
+        val blocking = leaving.filter { path ->
+            path in problems && git.check("--literal-pathspecs", "ls-tree", to, "--", path).stdout.let { it.isNotEmpty() && !it.startsWith("${Change.GITLINK} ") }
+        }
+        return if (blocking.isEmpty()) null else SyncResult.Failed(Problem.FOLDER_BLOCKED, blocking.joinToString("\n") { "$it: ${problems[it]}" })
     }
 
     private fun retireUndeclared(declared: List<Submodule>): SyncResult? {
@@ -188,6 +193,8 @@ internal class SubmoduleSync(
             is SyncResult.Failed -> throw Skip(stop.detail)
             else -> return stop.within(path)
         }
+        // Before the move, so that however it ends, a commit this device only followed never counts as its work
+        sub.check("update-ref", FOLLOWED, commit)
         step(Step.UPDATE_FOLDER)
         move(sub, head, commit)
         return null
@@ -225,7 +232,9 @@ internal class SubmoduleSync(
             FolderUpdate(sub).resume()?.let { throw Skip(it.detail) }
             // Off its branch means an earlier sync already began taking it out
             val onBranch = sub.branch() != null
-            if (onBranch && hasWorkOfItsOwn(sub, sub.head(), recorded = null)) syncWork(sub, path)?.let { return it }
+            val recorded = git.head()?.let { git.check("--literal-pathspecs", "ls-tree", it, "--", path).stdout }
+                ?.takeIf { it.startsWith("${Change.GITLINK} ") }?.substringBefore('\t')?.split(' ')?.get(2)
+            if (onBranch && hasWorkOfItsOwn(sub, sub.head(), recorded)) syncWork(sub, path)?.let { return it }
 
             val inner = nested(sub, path)
             inner.retireUndeclared(emptyList())?.let { return it.within(path) }
@@ -273,12 +282,15 @@ internal class SubmoduleSync(
         }
     }
 
-    /** Edits, untracked files, or commits on no remote and not [recorded]: made here, or by a stopped sync. */
+    /**
+     * Edits, untracked files, or commits this device made, by a sync stopped before its push or otherwise: those on no
+     * remote branch or tag, and neither [recorded] nor the last commit it followed, which may have come by its id.
+     */
     private fun hasWorkOfItsOwn(sub: RepoGit, head: String?, recorded: String?): Boolean {
         if (sub.check("status", "--porcelain", "-z").stdout.isNotEmpty()) return true
         if (head == null || head == recorded) return false
-        val known = listOfNotNull(recorded?.let { sub.resolve("$it^{commit}") })
-        return sub.check("rev-list", "-n", "1", head, "--not", "--remotes", *known.toTypedArray()).stdout.isNotBlank()
+        val known = listOfNotNull(recorded?.let { sub.resolve("$it^{commit}") }, sub.resolve(FOLLOWED))
+        return sub.check("rev-list", "-n", "1", head, "--not", "--remotes", "--tags", *known.toTypedArray()).stdout.isNotBlank()
     }
 
     private fun RepoGit.isAncestor(ancestor: String, of: String) = probe("merge-base", "--is-ancestor", ancestor, of).exitCode == 0
@@ -292,8 +304,10 @@ internal class SubmoduleSync(
         if (records[name]?.remove(variable) != null) git.check("config", "--unset", "$SET_UP.$name.$variable")
     }
 
+    /** Into a folder of its own, where it can never pass for a submodule's git dir. */
     private fun moveAside(gitDir: File) {
-        val aside = generateSequence(0) { it + 1 }.map { gitDir.resolveSibling("${gitDir.name}.${now()}.$it$OLD") }.first { !it.exists() }
+        val folder = git.repo.gitDir.resolve(ASIDE).apply { mkdirs() }
+        val aside = generateSequence(0) { it + 1 }.map { folder.resolve("${gitDir.name}.${now()}.$it") }.first { !it.exists() }
         if (!gitDir.renameTo(aside)) throw Skip("Could not move $gitDir aside.")
     }
 
@@ -316,6 +330,9 @@ internal class SubmoduleSync(
         const val PATH = "path"
         const val FOLLOW = "follow"
         const val FROM = "from"
-        const val OLD = ".old"
+        const val ASIDE = "safegit-modules-aside"
+
+        /** In a submodule's own repo, the last commit it followed. */
+        const val FOLLOWED = "refs/safegit/followed"
     }
 }

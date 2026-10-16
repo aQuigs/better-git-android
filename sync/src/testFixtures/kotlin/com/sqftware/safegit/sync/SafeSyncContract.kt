@@ -907,10 +907,14 @@ abstract class SafeSyncContract(tempParent: File? = null, workTreeParent: File? 
         sync()
         files.write("lib/phone.md", "from the phone\n")
         val libraryMain = git.ok(library, "rev-parse", "origin/main")
+        // A pull too, so the report must outlast the pass after the folder moves
+        laptop.write("todo.md", "from the laptop\n")
+        laptop.commitAndPush("laptop todo")
 
         val result = sync() as SyncResult.Failed
 
         assertEquals(Problem.SUBMODULE, result.problem)
+        assertEquals("from the laptop\n", files.read("todo.md"))
         git.ok(library, "fetch", "-q")
         assertEquals(libraryMain, git.ok(library, "rev-parse", "origin/main"))
         assertEquals("from the phone\n", files.read("lib/phone.md"))
@@ -1024,11 +1028,49 @@ abstract class SafeSyncContract(tempParent: File? = null, workTreeParent: File? 
         files.write("lib/secret.txt", "secret\n")
         val libraryHead = git.ok(library, "rev-parse", "HEAD")
         renameLibrary(name = "library", path = "lib")
+        laptop.write("todo.md", "from the laptop\n")
+        laptop.commitAndPush("laptop todo")
 
         repeat(2) { assertEquals(Problem.SUBMODULE, (sync() as SyncResult.Failed).problem) }
 
         assertEquals(libraryHead, git.ok(library.resolve("../lib.git"), "rev-parse", "main"))
         assertEquals("secret\n", files.read("lib/secret.txt"))
+        assertEquals("from the laptop\n", files.read("todo.md"))
+    }
+
+    @Test
+    fun neverPushesARecordedCommitThatOnlyATagHolds() {
+        val library = libraryRepo()
+        git.ok(library, "checkout", "-q", "--detach")
+        library.write("lib.md", "release\n")
+        git.ok(library, "commit", "-qam", "release")
+        git.ok(library, "tag", "v1")
+        git.ok(library, "push", "-q", "origin", "v1")
+        recordSubmodule(laptop, "lib", "../lib.git", git.ok(library, "rev-parse", "v1"))
+        val libraryMain = git.ok(library.resolve("../lib.git"), "rev-parse", "main")
+        sync()
+        assertEquals("release\n", files.read("lib/lib.md"))
+        laptopDropsLibrary()
+        laptop.commitAndPush("remove the library")
+
+        sync()
+
+        assertFalse(files.resolve("lib").exists())
+        assertEquals(libraryMain, git.ok(library.resolve("../lib.git"), "rev-parse", "main"))
+    }
+
+    @Test
+    fun followsASubmoduleWhoseNameEndsInOld() {
+        val library = libraryRepo()
+        recordSubmodule(laptop, "lib", "../lib.git", git.ok(library, "rev-parse", "HEAD"), name = "lib.old")
+        sync()
+        library.write("lib.md", "library, edited on the laptop\n")
+        library.commitAndPush("laptop library work")
+        laptopRecords(git.ok(library, "rev-parse", "HEAD"))
+
+        sync()
+
+        assertEquals("library, edited on the laptop\n", files.read("lib/lib.md"))
     }
 
     @Test

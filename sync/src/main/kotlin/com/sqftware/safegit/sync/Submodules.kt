@@ -23,7 +23,7 @@ internal class Submodules(private val git: RepoGit) {
         val variables = sections(git.check("config", "--blob", "$commit:.gitmodules", "--null", "--list").stdout.paths(), "submodule")
         val paths = variables.values.mapNotNull { it["path"] }
         if (paths.isEmpty()) return@getOrPut emptyList()
-        val recorded = git.check("ls-tree", "-z", commit, "--", *paths.toTypedArray()).stdout.paths()
+        val recorded = git.check("--literal-pathspecs", "ls-tree", "-z", commit, "--", *paths.toTypedArray()).stdout.paths()
             .filter { it.startsWith("${Change.GITLINK} ") }
             .associate { it.substringAfter('\t') to it.substringBefore('\t').split(' ')[2] }
 
