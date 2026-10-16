@@ -11,7 +11,8 @@ import java.nio.file.Files
  * brings the remote's files in, merging with any already there; where the folder has a `.git` of its own, as one Git
  * Sync made, its last commit is where the folder's own changes start. That repo must sync with the same remote branch
  * and be at rest, or the first sync could push what it holds back: markers of a rebase it stopped, files a sparse
- * checkout left out as deletions, or another repo's files.
+ * checkout left out as deletions, or another repo's files. A submodule's `.git` is usually a file naming its repo, and
+ * that repo is usually on no branch; the sync checks a submodule's work before pushing any.
  */
 class RepoSetup(private val git: Git, private val identity: Identity) {
     sealed interface Result {
@@ -20,7 +21,15 @@ class RepoSetup(private val git: Git, private val identity: Identity) {
         data class Failed(val problem: Problem, val detail: String = "") : Result
     }
 
-    fun connect(url: String, gitDir: File, folder: File, credentials: Credentials = Credentials.NONE): Result {
+    /** Connects to [branch], or to the remote's default branch when it is null. */
+    fun connect(
+        url: String,
+        gitDir: File,
+        folder: File,
+        credentials: Credentials = Credentials.NONE,
+        branch: String? = null,
+        submodule: Boolean = false,
+    ): Result {
         require(folder.isDirectory) { "No folder at $folder" }
         require(!gitDir.exists()) { "$gitDir already exists" }
         // Git would read it as an option
@@ -31,11 +40,11 @@ class RepoSetup(private val git: Git, private val identity: Identity) {
         val head = git.run(gitDir.parentFile, listOf("ls-remote", "--symref", url, "HEAD"), identity.environment + credentials.environment())
         if (!head.ok) return Result.Failed(Problem.FETCH, head.stderr.trim())
         // "ref: refs/heads/<branch>\tHEAD", or nothing from a repo without commits
-        val branch = head.stdout.lines().firstOrNull { it.startsWith("ref: ") }?.substringAfter("ref: ")?.substringBefore("\t")
+        val upstream = branch ?: head.stdout.lines().firstOrNull { it.startsWith("ref: ") }?.substringAfter("ref: ")?.substringBefore("\t")
             ?.removePrefix("refs/heads/") ?: DEFAULT_BRANCH
 
         return try {
-            create(RepoGit(git, Repo(gitDir, folder), identity), url, branch)
+            create(RepoGit(git, Repo(gitDir, folder), identity), url, upstream, submodule)
         } catch (e: GitFailure) {
             Result.Failed(Problem.GIT, e.message.orEmpty())
         } catch (e: IOException) {
@@ -43,7 +52,7 @@ class RepoSetup(private val git: Git, private val identity: Identity) {
         }.also { if (it !is Result.Connected) gitDir.deleteRecursively() }
     }
 
-    private fun create(repoGit: RepoGit, url: String, branch: String): Result {
+    private fun create(repoGit: RepoGit, url: String, branch: String, submodule: Boolean): Result {
         val folder = repoGit.repo.workTree
         val storage = probe(folder)
         repoGit.check("init", "--quiet", "--initial-branch", branch)
@@ -62,11 +71,11 @@ class RepoSetup(private val git: Git, private val identity: Identity) {
         // A probe file the app was killed before deleting is never synced
         exclude.writeText("/$PROBE*\n")
 
-        val own = Own(folder.resolve(".git"))
-        if (own.dir.isDirectory && own.head() != null) {
-            own.unusable(url, branch)?.let { return Result.Failed(Problem.FOLDER_REPO, it) }
+        val own = ownGitDir(folder.resolve(".git"), submodule)?.let { Own(it, folder) }
+        if (own != null && own.dir.isDirectory && own.head() != null) {
+            own.unusable(url, branch, onNoBranch = submodule)?.let { return Result.Failed(Problem.FOLDER_REPO, it) }
             own.dir.resolve("info/exclude").takeIf { it.isFile }?.let { exclude.appendText(it.readText()) }
-            repoGit.check(*TRUSTED, "fetch", "--quiet", own.dir.path, "HEAD")
+            repoGit.check(*TRUSTED, "fetch", "--quiet", "--no-recurse-submodules", own.dir.path, "HEAD")
             repoGit.check("update-ref", "refs/heads/$branch", "FETCH_HEAD")
             // The index from that commit, with the folder's stats, so the first sync sees only what changed since
             repoGit.check("read-tree", "HEAD")
@@ -75,21 +84,34 @@ class RepoSetup(private val git: Git, private val identity: Identity) {
         return Result.Connected(repoGit.repo)
     }
 
+    /** The git dir of [dotGit], a folder's `.git`: itself, or for a submodule, the one its `gitdir:` line names. */
+    private fun ownGitDir(dotGit: File, submodule: Boolean): File? = when {
+        dotGit.isDirectory -> dotGit
+        submodule && dotGit.isFile -> dotGit.readText().lineSequence().firstOrNull()?.takeIf { it.startsWith("gitdir: ") }
+            ?.removePrefix("gitdir: ")?.let { File(it).takeIf(File::isAbsolute) ?: dotGit.parentFile.resolve(it) }
+        else -> null
+    }
+
     /** The folder's own repo, read but never written. */
-    private inner class Own(val dir: File) {
-        private val git = RepoGit(this@RepoSetup.git, Repo(dir, dir.parentFile), identity)
+    private inner class Own(val dir: File, folder: File) {
+        private val git = RepoGit(this@RepoSetup.git, Repo(dir, folder), identity)
 
         fun head() = output("rev-parse", "--verify", "--quiet", "HEAD^{commit}")
 
-        /** Why its commit is no place to start [branch] of [url] from, or null when it is one. */
-        fun unusable(url: String, branch: String): String? {
+        /** Why its commit is no place to start [branch] of [url] from, or null when it is one; [onNoBranch], a submodule's may be on none. */
+        fun unusable(url: String, branch: String, onNoBranch: Boolean): String? {
             if (BUSY.any { dir.resolve(it).exists() } || check("ls-files", "--unmerged").isNotEmpty()) {
                 return "It is in the middle of a rebase, merge or cherry-pick. Finish or abort that in the app that started it."
             }
             if (output("config", "--bool", "core.sparseCheckout") == "true" || check("ls-files", "-t").lines().any { it.startsWith("S ") }) {
                 return "It has files checked out sparsely, which the first sync would take as deleted."
             }
-            val local = output("symbolic-ref", "--quiet", "--short", "HEAD") ?: return "It is not on a branch."
+            val local = output("symbolic-ref", "--quiet", "--short", "HEAD")
+            if (local == null) {
+                if (!onNoBranch) return "It is not on a branch."
+                val ownUrl = output("config", "remote.origin.url")
+                return if (ownUrl?.let(::sameRepo) == sameRepo(url)) null else "It syncs with ${ownUrl ?: "no remote"}, not $url."
+            }
             val ownUrl = output("config", "branch.$local.remote")?.let { output("config", "remote.$it.url") }
             val ownBranch = output("config", "branch.$local.merge")?.removePrefix("refs/heads/")
             if (ownUrl?.let(::sameRepo) != sameRepo(url) || ownBranch != branch) {

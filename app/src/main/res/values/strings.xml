@@ -39,6 +39,7 @@
     <string name="problem_folder_blocked">These files are in the way, and SafeGit won\'t overwrite them:</string>
     <string name="problem_folder_write">Couldn\'t write the folder; it was left as it was.</string>
     <string name="problem_folder_repo">The folder has a git repo of its own that SafeGit can\'t start from.</string>
+    <string name="problem_submodule">The rest synced, but SafeGit left these submodules as they were:</string>
     <string name="problem_git">Git stopped unexpectedly.</string>
 
     <string name="account_unavailable">This build can\'t sign in to GitHub, so it syncs public repos only.</string>
