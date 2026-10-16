@@ -14,9 +14,6 @@ import java.util.Base64
  * Android only lets an app execute files from its nativeLibraryDir, where every file must be named lib*.so. So the names
  * git looks for, its helpers in GIT_EXEC_PATH and libraries with versioned sonames, are symlinks into that directory.
  * They are rebuilt on every call because nativeLibraryDir moves when the app updates.
- *
- * Anything git runs through a shell fails, since the build's shell is Termux's sh: hooks, aliases, and remotes given
- * as a local path. HTTPS remotes need none of them.
  */
 class BundledGit(private val context: Context) {
     fun install(): Git {

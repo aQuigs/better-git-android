@@ -1,6 +1,7 @@
 package com.sqftware.safegit.git
 
 import java.io.File
+import java.io.IOException
 import kotlin.concurrent.thread
 
 /**
@@ -11,7 +12,7 @@ import kotlin.concurrent.thread
  * transfer that stalls.
  */
 class CliGit(private val executable: String, private val environment: Map<String, String> = emptyMap()) : Git {
-    override fun run(dir: File, args: List<String>, environment: Map<String, String>): GitResult {
+    override fun run(dir: File, args: List<String>, environment: Map<String, String>, input: String): GitResult {
         val process = ProcessBuilder(listOf(executable) + args)
             .directory(dir)
             .apply {
@@ -20,13 +21,19 @@ class CliGit(private val executable: String, private val environment: Map<String
             }
             .start()
         try {
-            process.outputStream.close()
-
-            // Drained on its own thread, since git blocks once either pipe's buffer fills
+            // Each stream has its own thread, since git blocks once any pipe's buffer fills
+            // A git that exits without reading its input closes the pipe; on Android an uncaught throw would crash the app
+            val writer = thread {
+                try {
+                    process.outputStream.bufferedWriter().use { it.write(input) }
+                } catch (_: IOException) {
+                }
+            }
             var stderr = ""
             val stderrReader = thread { stderr = process.errorStream.bufferedReader().readText() }
             val stdout = process.inputStream.bufferedReader().readText()
             stderrReader.join()
+            writer.join()
 
             return GitResult(process.waitFor(), stdout, stderr)
         } finally {
