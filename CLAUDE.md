@@ -46,7 +46,8 @@ Git Sync (ViscousPot/GitSync, Flutter + libgit2) loses work: its pull merges and
 - **Binaries:** each build takes Termux's latest packages, so security fixes arrive with Termux. git is GPLv2: the app needs a source offer naming the versions listed in `assets/git/packages`.
 - **Case twins on the remote:** a remote (from Linux) holding two names that differ only by case blocks every sync (`FOLDER_BLOCKED`) until it is fixed there. Nothing is lost, but the UI should explain it.
 - **Residual window:** a notes app saving a file in the instant between `FolderUpdate`'s last check and its rename would lose that save.
-- **Renamed only by case on the phone:** git with `core.ignorecase` never records it, so a remote change to that file blocks the sync (`FOLDER_BLOCKED`) until the name matches again. Nothing is lost, but the UI should explain it.
+- **Renamed only by case on the phone:** git with `core.ignorecase` never records it. When an update changes that file, `FolderUpdate` first gives it HEAD's spelling back if its content is still HEAD's, as desktop git's checkout would. The user's rename is undone; nothing else is lost.
+- **Resuming a killed update:** a file the update had already written, which the user then moved or deleted before the next sync, is written again when that sync finishes the update. Nothing is lost, but the old name comes back.
 - **Dropped commits:** commits the remote dropped with a force push leave the phone's branch too (kept in the backup ref). The UI should say so.
 - **Backup refs** are never pruned yet.
 - **Cancellation:** `CliGit` cannot stop a running git yet. When sync becomes cancellable, kill git cleanly. A sync removes an `index.lock` it finds at the start, which is safe only while syncs of a repo never overlap: `SyncWorker` holds a per-repo lock on the thread running git, since a stopped worker's git runs on while WorkManager starts the work again.
