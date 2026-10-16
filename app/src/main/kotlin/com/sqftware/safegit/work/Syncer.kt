@@ -17,6 +17,7 @@ import com.sqftware.safegit.sync.Choice
 import com.sqftware.safegit.sync.Keep
 import com.sqftware.safegit.sync.Problem
 import com.sqftware.safegit.sync.SafeSync
+import com.sqftware.safegit.sync.Step
 import com.sqftware.safegit.sync.SyncResult
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -31,7 +32,11 @@ import java.util.concurrent.ConcurrentHashMap
 
 /** Where a repo's sync stands: running, or the last one's result. */
 sealed interface SyncState {
-    data object Running : SyncState
+    /** Asked for, but Android has not started it yet. */
+    data object Waiting : SyncState
+
+    /** Started; [step] is null until the sync reports its first. */
+    data class Running(val step: Step?) : SyncState
 
     data class Finished(val result: SyncResult) : SyncState
 }
@@ -52,9 +57,9 @@ class WorkSyncer(context: Context, repos: RepoStore, private val records: SyncRe
 
     // WorkManager only says what is running: it prunes finished work after a day, and the records keep every result
     override val states: Flow<Map<String, SyncState>> = combine(repos.all, work.getWorkInfosByTagFlow(TAG)) { saved, infos ->
-        val running = infos.filter { !it.state.isFinished }.mapNotNull { it.repoId }.toSet()
+        val unfinished = infos.filter { !it.state.isFinished }.associateBy { it.repoId }
         saved.mapNotNull { repo ->
-            val state = if (repo.id in running) SyncState.Running else records.result(repo.id)?.let(SyncState::Finished)
+            val state = unfinished[repo.id]?.let(::syncState) ?: records.result(repo.id)?.let(SyncState::Finished)
             state?.let { repo.id to it }
         }.toMap()
     }.distinctUntilChanged().flowOn(Dispatchers.IO)
@@ -71,6 +76,11 @@ class WorkSyncer(context: Context, repos: RepoStore, private val records: SyncRe
                 .build()
             work.enqueueUniqueWork("sync-${repo.id}", ExistingWorkPolicy.KEEP, request)
         }
+    }
+
+    private fun syncState(info: WorkInfo) = when (info.state) {
+        WorkInfo.State.RUNNING -> SyncState.Running(info.progress.getString(SyncWorker.STEP)?.let(Step::valueOf))
+        else -> SyncState.Waiting
     }
 
     private val WorkInfo.repoId get() = tags.firstOrNull { it.startsWith(REPO_TAG) }?.removePrefix(REPO_TAG)
@@ -92,7 +102,9 @@ class SyncWorker(context: Context, params: WorkerParameters) : CoroutineWorker(c
         synchronized(locks.computeIfAbsent(id) { Any() }) {
             val result = try {
                 SafeSync(services.git, services.signIn.identity(services.device), services.device)
-                    .sync(services.repo(saved), services.signIn.credentials(), services.records.takeChoices(id))
+                    .sync(services.repo(saved), services.signIn.credentials(), services.records.takeChoices(id)) { step ->
+                        setProgressAsync(workDataOf(STEP to step.name))
+                    }
             } catch (e: Exception) {
                 // Shown like any other failure rather than leaving the last result up as if nothing had happened
                 SyncResult.Failed(Problem.GIT, e.toString())
@@ -104,6 +116,7 @@ class SyncWorker(context: Context, params: WorkerParameters) : CoroutineWorker(c
 
     companion object {
         const val REPO = "repo"
+        const val STEP = "step"
         private val locks = ConcurrentHashMap<String, Any>()
     }
 }

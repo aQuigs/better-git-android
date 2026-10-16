@@ -13,6 +13,12 @@
 
     <string name="state_never">Not synced yet</string>
     <string name="state_running">Syncing…</string>
+    <string name="state_waiting">Waiting for Android to start the sync…</string>
+    <string name="step_commit">Committing this phone\'s changes…</string>
+    <string name="step_fetch">Fetching the remote\'s changes…</string>
+    <string name="step_merge">Combining both sides…</string>
+    <string name="step_update_folder">Updating the folder…</string>
+    <string name="step_push">Pushing…</string>
     <string name="state_up_to_date">Up to date</string>
     <string name="state_synced">Synced</string>
     <string name="state_conflict">Both sides changed the same lines. Each of these files now holds both versions, between lines starting with &lt;&lt;&lt;&lt;&lt;&lt;&lt; and &gt;&gt;&gt;&gt;&gt;&gt;&gt;. Edit them to keep what you want, then sync. Nothing is pushed until then.</string>

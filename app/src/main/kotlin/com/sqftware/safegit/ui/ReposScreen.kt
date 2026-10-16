@@ -29,6 +29,7 @@ import com.sqftware.safegit.R
 import com.sqftware.safegit.repos.SavedRepo
 import com.sqftware.safegit.sync.Choice
 import com.sqftware.safegit.sync.Keep
+import com.sqftware.safegit.sync.Step
 import com.sqftware.safegit.sync.SyncResult
 import com.sqftware.safegit.work.SyncState
 
@@ -67,8 +68,8 @@ private fun RepoCard(row: RepoRow, onSync: (Map<Choice, Keep>) -> Unit) {
 
             when (val state = row.state) {
                 null -> Text(stringResource(R.string.state_never))
-                SyncState.Running -> {
-                    Text(stringResource(R.string.state_running))
+                SyncState.Waiting, is SyncState.Running -> {
+                    Text(stringResource(progressText(state)))
                     LinearProgressIndicator(Modifier.fillMaxWidth())
                 }
                 is SyncState.Finished -> Outcome(state.result, onSync)
@@ -77,7 +78,7 @@ private fun RepoCard(row: RepoRow, onSync: (Map<Choice, Keep>) -> Unit) {
             // A choice syncs with its own button
             val choosing = (row.state as? SyncState.Finished)?.result is SyncResult.Choose
             if (!choosing) {
-                Button(onClick = { onSync(emptyMap()) }, enabled = row.state != SyncState.Running) { Text(stringResource(R.string.sync)) }
+                Button(onClick = { onSync(emptyMap()) }, enabled = row.state !is SyncState.Running && row.state != SyncState.Waiting) { Text(stringResource(R.string.sync)) }
             }
         }
     }
@@ -125,3 +126,12 @@ private fun sides(choice: Choice) = when {
 
 @Composable
 private fun side(objectId: String?) = stringResource(if (objectId == null) R.string.side_none else R.string.side_file)
+
+private fun progressText(state: SyncState) = when ((state as? SyncState.Running)?.step) {
+    null -> if (state == SyncState.Waiting) R.string.state_waiting else R.string.state_running
+    Step.COMMIT -> R.string.step_commit
+    Step.FETCH -> R.string.step_fetch
+    Step.MERGE -> R.string.step_merge
+    Step.UPDATE_FOLDER -> R.string.step_update_folder
+    Step.PUSH -> R.string.step_push
+}

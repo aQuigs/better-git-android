@@ -118,6 +118,20 @@ abstract class SafeSyncContract(tempParent: File? = null, workTreeParent: File? 
     }
 
     @Test
+    fun saysEachStepItTakes() {
+        val steps = mutableListOf<Step>()
+        sync(step = steps::add)
+        assertEquals(listOf(Step.COMMIT, Step.FETCH), steps)
+
+        steps.clear()
+        laptop.write("laptop.md", "x")
+        laptop.commitAndPush("laptop work")
+        files.write("phone.md", "y")
+        sync(step = steps::add)
+        assertEquals(listOf(Step.COMMIT, Step.FETCH, Step.MERGE, Step.UPDATE_FOLDER, Step.PUSH), steps)
+    }
+
+    @Test
     fun keepsTheOriginalCommitsUnderABackupRef() {
         laptop.write("laptop.md", "x")
         laptop.commitAndPush("laptop work")
@@ -858,8 +872,8 @@ abstract class SafeSyncContract(tempParent: File? = null, workTreeParent: File? 
 
     private fun asked(result: SyncResult) = (result as? SyncResult.Choose)?.choices ?: throw AssertionError("Not a choice: $result")
 
-    private fun sync(git: Git = this.git, repo: Repo = phone, choices: Map<Choice, Keep> = emptyMap()) =
-        SafeSync(git, PHONE, device = "Pixel", now = { 1000 }).sync(repo, choices = choices)
+    private fun sync(git: Git = this.git, repo: Repo = phone, choices: Map<Choice, Keep> = emptyMap(), step: (Step) -> Unit = {}) =
+        SafeSync(git, PHONE, device = "Pixel", now = { 1000 }).sync(repo, choices = choices, step = step)
 
     /** Both sides change the second line of notes.md; returns the remote's commit, which has the laptop's change. */
     private fun conflictInNotes(): String {
