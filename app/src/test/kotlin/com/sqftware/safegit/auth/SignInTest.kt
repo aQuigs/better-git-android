@@ -1,12 +1,14 @@
 package com.sqftware.safegit.auth
 
 import com.sqftware.safegit.sync.Credentials
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.IOException
@@ -51,6 +53,38 @@ class SignInTest {
         assertEquals(null, store.session)
         assertEquals(Credentials.NONE, signIn.credentials())
         assertEquals("SafeGit on Pixel", signIn.identity("Pixel").name)
+    }
+
+    @Test
+    fun signingInAgainReplacesTheToken() = runBlocking {
+        store.session = Session(octo, "revoked")
+        val signIn = signIn(FakeFlow(Poll.Granted("tok")))
+        settle(signIn)
+
+        assertTrue(signIn.canSignInAgain("https://github.com/octo/notes.git"))
+        assertFalse(signIn.canSignInAgain("https://gitlab.com/octo/notes.git"))
+        signIn.signInAgain()
+
+        assertEquals(SignIn.State.SignedIn(octo), signIn.state.first { it is SignIn.State.SignedIn })
+        assertEquals(Session(octo, "tok"), store.session)
+    }
+
+    @Test
+    fun signingInAgainLeavesASignInUnderWayToFinish() = runBlocking {
+        store.session = Session(octo, "old")
+        val polled = CompletableDeferred<Unit>()
+        val signIn = SignIn(FakeFlow(Poll.Granted("tok")), store, this, wait = { polled.await() })
+        settle(signIn)
+        signIn.signIn()
+        signIn.state.first { it is SignIn.State.Waiting }
+
+        signIn.signInAgain()
+
+        assertEquals(Session(octo, "old"), store.session)
+        assertFalse(signIn.canSignInAgain("https://github.com/octo/notes.git"))
+        polled.complete(Unit)
+        signIn.state.first { it is SignIn.State.SignedIn }
+        assertEquals(Session(octo, "tok"), store.session)
     }
 
     @Test

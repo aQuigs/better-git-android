@@ -15,6 +15,7 @@ import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -29,19 +30,21 @@ import com.sqftware.safegit.R
 import com.sqftware.safegit.repos.SavedRepo
 import com.sqftware.safegit.sync.Choice
 import com.sqftware.safegit.sync.Keep
+import com.sqftware.safegit.sync.Problem
 import com.sqftware.safegit.sync.Step
 import com.sqftware.safegit.sync.SyncResult
 import com.sqftware.safegit.work.SyncState
 
-/** A connected repo as the list shows it. */
-data class RepoRow(val repo: SavedRepo, val state: SyncState?)
+/** A connected repo as the list shows it; [canSignIn] when a new sign-in could help its remote, and none is under way. */
+data class RepoRow(val repo: SavedRepo, val state: SyncState?, val canSignIn: Boolean = false)
 
-/** The connected repos, under [header], such as the account syncs run as. */
+/** The connected repos, under [header], such as the account syncs run as; [onSignIn] replaces a sign-in a remote refused. */
 @Composable
 fun ReposScreen(
     rows: List<RepoRow>,
     onSync: (SavedRepo, Map<Choice, Keep>) -> Unit,
     onAdd: () -> Unit,
+    onSignIn: () -> Unit = {},
     header: @Composable () -> Unit = {},
 ) {
     Scaffold(
@@ -53,14 +56,14 @@ fun ReposScreen(
                 item { Text(stringResource(R.string.repos_empty), Modifier.padding(8.dp), style = MaterialTheme.typography.bodyLarge) }
             }
             items(rows, key = { it.repo.id }) { row ->
-                RepoCard(row, onSync = { choices -> onSync(row.repo, choices) })
+                RepoCard(row, onSync = { choices -> onSync(row.repo, choices) }, onSignIn)
             }
         }
     }
 }
 
 @Composable
-private fun RepoCard(row: RepoRow, onSync: (Map<Choice, Keep>) -> Unit) {
+private fun RepoCard(row: RepoRow, onSync: (Map<Choice, Keep>) -> Unit, onSignIn: () -> Unit) {
     Card(Modifier.fillMaxWidth().padding(bottom = 12.dp)) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text(row.repo.name, style = MaterialTheme.typography.titleMedium)
@@ -72,7 +75,7 @@ private fun RepoCard(row: RepoRow, onSync: (Map<Choice, Keep>) -> Unit) {
                     Text(stringResource(if (state is SyncState.Running) stepText(state.step) else R.string.state_waiting))
                     LinearProgressIndicator(Modifier.fillMaxWidth())
                 }
-                is SyncState.Finished -> Outcome(state.result, onSync)
+                is SyncState.Finished -> Outcome(state.result, onSync, row.canSignIn, onSignIn)
             }
 
             // A choice syncs with its own button
@@ -85,7 +88,7 @@ private fun RepoCard(row: RepoRow, onSync: (Map<Choice, Keep>) -> Unit) {
 }
 
 @Composable
-private fun Outcome(result: SyncResult, onSync: (Map<Choice, Keep>) -> Unit) {
+private fun Outcome(result: SyncResult, onSync: (Map<Choice, Keep>) -> Unit, canSignIn: Boolean, onSignIn: () -> Unit) {
     when (result) {
         SyncResult.UpToDate -> Text(stringResource(R.string.state_up_to_date))
         is SyncResult.Synced -> Text(stringResource(R.string.state_synced))
@@ -96,7 +99,10 @@ private fun Outcome(result: SyncResult, onSync: (Map<Choice, Keep>) -> Unit) {
             }
         }
         is SyncResult.Choose -> Choices(result.choices, onSync)
-        is SyncResult.Failed -> Failure(result.problem, result.detail)
+        is SyncResult.Failed -> {
+            Failure(result.problem, result.detail)
+            if (result.problem == Problem.SIGN_IN && canSignIn) OutlinedButton(onClick = onSignIn) { Text(stringResource(R.string.sign_in_again)) }
+        }
     }
 }
 

@@ -65,6 +65,9 @@ enum class Problem {
     NO_UPSTREAM,
     FETCH,
     PUSH,
+
+    /** The remote wants a sign-in: it refused the one sent, or none was sent. Hosts such as GitHub say so of a missing repo too. */
+    SIGN_IN,
     REMOTE_KEPT_CHANGING,
     FOLDER_KEPT_CHANGING,
 
@@ -81,6 +84,13 @@ enum class Problem {
     SUBMODULE,
     GIT,
 }
+
+/**
+ * [otherwise], or [Problem.SIGN_IN] when the remote refused git for want of a sign-in: with prompts off, git stops at
+ * asking for a user name or password only once the server has said it needs one.
+ */
+internal fun GitResult.remoteProblem(otherwise: Problem) =
+    if ("could not read Username" in stderr || "could not read Password" in stderr) Problem.SIGN_IN else otherwise
 
 /**
  * Syncs a repo's current branch with its upstream without ever losing work. Local changes are committed first, then
@@ -378,7 +388,7 @@ class SafeSync(
         data class Choose(val choices: List<Choice>) : Combined
     }
 
-    private fun GitResult.failed(problem: Problem) = SyncResult.Failed(problem, stderr.trim())
+    private fun GitResult.failed(problem: Problem) = SyncResult.Failed(remoteProblem(problem), stderr.trim())
 
     private companion object {
         const val ATTEMPTS = 3

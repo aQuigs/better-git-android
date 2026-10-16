@@ -70,7 +70,7 @@ class SignIn(
     @Synchronized
     fun signIn() {
         val flow = flow ?: return
-        if (current.value == State.Starting || current.value is State.Waiting) return
+        if (signingIn()) return
         val mine = ++attempt
         current.value = State.Starting
         job = scope.launch {
@@ -88,7 +88,7 @@ class SignIn(
     /** Stops a sign-in still waiting for the user; one that already got its token is kept. */
     @Synchronized
     fun cancel() {
-        if (current.value != State.Starting && current.value !is State.Waiting) return
+        if (!signingIn()) return
         attempt++
         job?.cancel()
         current.value = signedOut()
@@ -102,6 +102,22 @@ class SignIn(
         remember(null)
         current.value = signedOut()
     }
+
+    /**
+     * Swaps a sign-in the host no longer accepts for a new one; until that is granted, syncs go without. A sign-in under
+     * way is left to finish, since the user may already have entered its code.
+     */
+    @Synchronized
+    fun signInAgain() {
+        if (signingIn()) return
+        signOut()
+        signIn()
+    }
+
+    /** Whether [signInAgain] can help a remote at [url] that refused the sign-in: the token goes there, and none is under way. */
+    fun canSignInAgain(url: String) = flow != null && current.value != State.Loading && !signingIn() && url.startsWith(GITHUB)
+
+    private fun signingIn() = current.value == State.Starting || current.value is State.Waiting
 
     private suspend fun session(flow: DeviceFlow, mine: Int): Session {
         val code = flow.start()
