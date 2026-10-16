@@ -117,7 +117,8 @@ class RepoSetup(private val git: Git, private val identity: Identity) {
 
         private fun check(vararg args: String) = git.check(*TRUSTED, *args).stdout.trim()
 
-        private fun sameRepo(url: String) = url.trimEnd('/').removeSuffix(".git")
+        // A repo another app cloned over SSH is the one its HTTPS URL names
+        private fun sameRepo(url: String) = overHttps(url).trimEnd('/').removeSuffix(".git")
     }
 
     private class Storage(val ignoresCase: Boolean, val holdsSymlinks: Boolean)
