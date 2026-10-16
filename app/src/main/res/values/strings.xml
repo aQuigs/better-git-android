@@ -50,6 +50,7 @@
     <string name="add_url">Repo URL</string>
     <string name="add_url_hint">https://github.com/you/notes.git</string>
     <string name="add_url_pick">Pick one of your GitHub repos, or paste any URL.</string>
+    <string name="add_sign_in_refused">GitHub no longer accepts this sign-in. Sign out and sign in again.</string>
     <string name="add_repos_failed">Couldn\'t list your GitHub repos. Paste the URL instead.</string>
     <string name="add_folder">Choose folder</string>
     <string name="add_folder_none">No folder chosen</string>

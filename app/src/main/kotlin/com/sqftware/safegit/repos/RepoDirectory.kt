@@ -6,24 +6,35 @@ import org.json.JSONArray
 /** A repo an account can connect: the name its host shows, and the URL git clones. */
 data class HostedRepo(val name: String, val url: String)
 
-/** Lists the repos an account can reach on its host. */
+/** Lists the repos the signed-in account can reach on its host. */
 interface RepoDirectory {
-    /** Most recently pushed first. Blocks on the network and throws [java.io.IOException] when it fails. */
-    fun repos(token: String): List<HostedRepo>
+    /**
+     * Most recently pushed first, and none when signed out. Blocks on the network and throws [java.io.IOException] when
+     * it fails, a [com.sqftware.safegit.net.HttpStatusException] of 401 when the host no longer takes the sign-in.
+     */
+    fun repos(): List<HostedRepo>
 }
 
-/** Every repo the GitHub account owns, collaborates on or reaches through an organization. */
-class GitHubRepoDirectory(private val api: String = "https://api.github.com") : RepoDirectory {
-    override fun repos(token: String): List<HostedRepo> {
+/**
+ * The repos the GitHub account of [token] owns, collaborates on or reaches through an organization, leaving out those
+ * it cannot push to (read-only or archived), where every sync would fail.
+ */
+class GitHubRepoDirectory(private val token: () -> String?, private val api: String = "https://api.github.com") : RepoDirectory {
+    override fun repos(): List<HostedRepo> {
+        val token = token() ?: return emptyList()
         val repos = mutableListOf<HostedRepo>()
         var page = 1
         do {
-            val json = JSONArray(fetchJson("$api/user/repos?sort=pushed&per_page=$PAGE&page=${page++}", body = null, "Authorization" to "Bearer $token"))
-            for (i in 0 until json.length()) {
-                val repo = json.getJSONObject(i)
-                repos += HostedRepo(repo.getString("full_name"), repo.getString("clone_url"))
+            val count = fetchJson("$api/user/repos?sort=pushed&per_page=$PAGE&page=${page++}", token = token) {
+                val json = JSONArray(it)
+                for (i in 0 until json.length()) {
+                    val repo = json.getJSONObject(i)
+                    val pushable = repo.optJSONObject("permissions")?.optBoolean("push") == true && !repo.optBoolean("archived")
+                    if (pushable) repos += HostedRepo(repo.getString("full_name"), repo.getString("clone_url"))
+                }
+                json.length()
             }
-        } while (json.length() == PAGE)
+        } while (count == PAGE)
         return repos
     }
 

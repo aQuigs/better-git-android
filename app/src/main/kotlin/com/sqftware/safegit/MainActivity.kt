@@ -23,13 +23,11 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.produceState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.net.toUri
 import com.sqftware.safegit.auth.DeviceCode
-import com.sqftware.safegit.auth.SignIn
 import com.sqftware.safegit.repos.Connector
 import com.sqftware.safegit.storage.AllFilesAccess
 import com.sqftware.safegit.storage.StorageAccess
@@ -38,13 +36,8 @@ import com.sqftware.safegit.ui.AccessScreen
 import com.sqftware.safegit.ui.AccountCard
 import com.sqftware.safegit.ui.AddRepoScreen
 import com.sqftware.safegit.ui.RepoRow
-import com.sqftware.safegit.ui.RepoChoices
 import com.sqftware.safegit.ui.ReposScreen
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
-import org.json.JSONException
 import java.io.File
-import java.io.IOException
 
 class MainActivity : ComponentActivity() {
     private val access: StorageAccess by lazy { AllFilesAccess(this) }
@@ -127,16 +120,7 @@ private fun openCode(context: Context, code: DeviceCode) {
 @Composable
 private fun AddRepo(services: Services, state: Connector.State, onDone: () -> Unit) {
     val connector = services.connector
-    val account by services.signIn.state.collectAsState()
-    val signedIn = account is SignIn.State.SignedIn
-    val choices by produceState<RepoChoices>(RepoChoices.None, signedIn) {
-        if (signedIn) {
-            value = RepoChoices.Loading
-            value = withContext(Dispatchers.IO) { choices(services) }
-        } else {
-            value = RepoChoices.None
-        }
-    }
+    val choices by services.accountRepos.state.collectAsState()
     var folder by rememberSaveable { mutableStateOf<String?>(null) }
     var unusable by rememberSaveable { mutableStateOf(false) }
     val pick = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { tree ->
@@ -161,17 +145,6 @@ private fun AddRepo(services: Services, state: Connector.State, onDone: () -> Un
         onCancel = cancel,
         choices = choices,
     )
-}
-
-private fun choices(services: Services): RepoChoices {
-    val token = services.signIn.token() ?: return RepoChoices.None
-    return try {
-        RepoChoices.Loaded(services.directory.repos(token))
-    } catch (_: IOException) {
-        RepoChoices.Failed
-    } catch (_: JSONException) {
-        RepoChoices.Failed
-    }
 }
 
 @Composable

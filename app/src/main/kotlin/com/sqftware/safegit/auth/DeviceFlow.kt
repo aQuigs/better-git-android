@@ -37,16 +37,15 @@ interface DeviceFlow {
 
 /**
  * GitHub's OAuth device flow, which needs only the OAuth app's public client id, no secret and no backend. Every call
- * blocks on the network and throws [java.io.IOException] when it fails, or a JSONException for an answer it cannot read.
+ * blocks on the network and throws [java.io.IOException] when it fails or gets an answer it cannot read.
  */
 class GitHubDeviceFlow(
     private val clientId: String,
     private val web: String = "https://github.com",
     private val api: String = "https://api.github.com",
 ) : DeviceFlow {
-    override fun start(): DeviceCode {
-        val json = post("$web/login/device/code", "client_id" to clientId, "scope" to "repo")
-        return DeviceCode(
+    override fun start(): DeviceCode = post("$web/login/device/code", "client_id" to clientId, "scope" to "repo") { json ->
+        DeviceCode(
             json.getString("user_code"),
             json.getString("verification_uri"),
             json.getString("device_code"),
@@ -55,26 +54,25 @@ class GitHubDeviceFlow(
         )
     }
 
-    override fun poll(code: DeviceCode): Poll {
-        val json = post(
-            "$web/login/oauth/access_token",
-            "client_id" to clientId,
-            "device_code" to code.deviceCode,
-            "grant_type" to "urn:ietf:params:oauth:grant-type:device_code",
-        )
-        if (json.has("access_token")) return Poll.Granted(json.getString("access_token"))
-        return when (val error = json.optString("error")) {
+    override fun poll(code: DeviceCode): Poll = post(
+        "$web/login/oauth/access_token",
+        "client_id" to clientId,
+        "device_code" to code.deviceCode,
+        "grant_type" to "urn:ietf:params:oauth:grant-type:device_code",
+    ) { json ->
+        if (json.has("access_token")) return@post Poll.Granted(json.getString("access_token"))
+        when (val error = json.optString("error")) {
             "authorization_pending" -> Poll.Pending
             "slow_down" -> Poll.SlowDown(json.optInt("interval", code.interval + 5))
             else -> Poll.Ended(json.optString("error_description", error))
         }
     }
 
-    override fun account(token: String): Account {
-        val json = JSONObject(fetchJson("$api/user", body = null, "Authorization" to "Bearer $token"))
-        return Account(json.getString("login"), json.getLong("id"), json.optString("name").takeIf { !json.isNull("name") && it.isNotEmpty() })
+    override fun account(token: String): Account = fetchJson("$api/user", token = token) {
+        val json = JSONObject(it)
+        Account(json.getString("login"), json.getLong("id"), json.optString("name").takeIf { !json.isNull("name") && it.isNotEmpty() })
     }
 
-    private fun post(url: String, vararg form: Pair<String, String>) =
-        JSONObject(fetchJson(url, form.joinToString("&") { (key, value) -> "$key=${URLEncoder.encode(value, "UTF-8")}" }))
+    private fun <T> post(url: String, vararg form: Pair<String, String>, read: (JSONObject) -> T) =
+        fetchJson(url, form.joinToString("&") { (key, value) -> "$key=${URLEncoder.encode(value, "UTF-8")}" }) { read(JSONObject(it)) }
 }

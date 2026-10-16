@@ -7,10 +7,10 @@ import com.sqftware.safegit.auth.KeystoreTokenStore
 import com.sqftware.safegit.auth.SignIn
 import com.sqftware.safegit.git.BundledGit
 import com.sqftware.safegit.git.Git
+import com.sqftware.safegit.repos.AccountRepos
 import com.sqftware.safegit.repos.Connector
 import com.sqftware.safegit.repos.FileRepoStore
 import com.sqftware.safegit.repos.GitHubRepoDirectory
-import com.sqftware.safegit.repos.RepoDirectory
 import com.sqftware.safegit.repos.RepoStore
 import com.sqftware.safegit.repos.SavedRepo
 import com.sqftware.safegit.sync.Identity
@@ -21,6 +21,7 @@ import com.sqftware.safegit.work.WorkSyncer
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.map
 
 /** What the app's parts share, built once per process. */
 class Services private constructor(context: Context) {
@@ -43,7 +44,7 @@ class Services private constructor(context: Context) {
         KeystoreTokenStore(context.filesDir.resolve("github.json")),
         scope,
     )
-    val directory: RepoDirectory = GitHubRepoDirectory()
+    val accountRepos = AccountRepos(GitHubRepoDirectory(signIn::token), signIn.state.map { it is SignIn.State.SignedIn }, scope)
     val syncer: Syncer = WorkSyncer(context, repos, records, scope)
 
     // Connecting commits nothing, so who it runs as never shows

@@ -14,25 +14,30 @@ class GitHubRepoDirectoryTest {
         createContext("/user/repos") { exchange ->
             synchronized(queries) { queries += exchange.requestURI.query }
             val page = exchange.requestURI.query.substringAfterLast("page=").toInt()
-            val count = if (page == 1) 100 else 1
-            val body = (1..count).joinToString(",", "[", "]") {
-                val name = "me/repo${(page - 1) * 100 + it}"
-                """{"full_name":"$name","clone_url":"https://github.com/$name.git","private":true}"""
-            }.toByteArray()
+            val repos = if (page == 1) {
+                (1..100).map { repo("me/repo$it") }
+            } else {
+                listOf(repo("me/repo101"), repo("org/read-only", push = false), repo("me/old", archived = true))
+            }
+            val body = repos.joinToString(",", "[", "]").toByteArray()
             val authorized = exchange.requestHeaders.getFirst("Authorization") == "Bearer tok"
             exchange.sendResponseHeaders(if (authorized) 200 else 401, body.size.toLong())
             exchange.responseBody.use { it.write(body) }
         }
         start()
     }
-    private val directory = GitHubRepoDirectory("http://127.0.0.1:${server.address.port}")
+    private var token: String? = "tok"
+    private val directory = GitHubRepoDirectory({ token }, "http://127.0.0.1:${server.address.port}")
 
     @After
     fun stop() = server.stop(0)
 
+    private fun repo(name: String, push: Boolean = true, archived: Boolean = false) =
+        """{"full_name":"$name","clone_url":"https://github.com/$name.git","archived":$archived,"permissions":{"admin":false,"push":$push,"pull":true}}"""
+
     @Test
-    fun listsEveryPage() {
-        val repos = directory.repos("tok")
+    fun listsEveryPageOfReposItCanPushTo() {
+        val repos = directory.repos()
 
         assertEquals(101, repos.size)
         assertEquals(HostedRepo("me/repo1", "https://github.com/me/repo1.git"), repos.first())
@@ -42,6 +47,15 @@ class GitHubRepoDirectoryTest {
 
     @Test(expected = IOException::class)
     fun failsForATokenGitHubRefuses() {
-        directory.repos("revoked")
+        token = "revoked"
+        directory.repos()
+    }
+
+    @Test
+    fun listsNoneWhenSignedOut() {
+        token = null
+
+        assertEquals(emptyList<HostedRepo>(), directory.repos())
+        assertEquals(emptyList<String>(), queries)
     }
 }

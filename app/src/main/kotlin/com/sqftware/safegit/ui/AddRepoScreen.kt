@@ -29,24 +29,14 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 import com.sqftware.safegit.R
+import com.sqftware.safegit.repos.AccountRepos
 import com.sqftware.safegit.repos.Connector
-import com.sqftware.safegit.repos.HostedRepo
 import java.io.File
-
-/** The signed-in account's repos, to pick one instead of pasting its URL. */
-sealed interface RepoChoices {
-    /** Signed out: only a pasted URL. */
-    data object None : RepoChoices
-
-    data object Loading : RepoChoices
-
-    data class Loaded(val repos: List<HostedRepo>) : RepoChoices
-
-    data object Failed : RepoChoices
-}
 
 /** Connects a folder to a repo URL; [state] is how the last try went. */
 @Composable
@@ -57,14 +47,15 @@ fun AddRepoScreen(
     onPickFolder: () -> Unit,
     onConnect: (url: String) -> Unit,
     onCancel: () -> Unit,
-    choices: RepoChoices = RepoChoices.None,
+    choices: AccountRepos.State = AccountRepos.State.None,
 ) {
     val connecting = state == Connector.State.Connecting
-    var url by rememberSaveable { mutableStateOf("") }
+    var field by rememberSaveable(stateSaver = TextFieldValue.Saver) { mutableStateOf(TextFieldValue()) }
+    val url = field.text
     Scaffold { padding ->
         Column(Modifier.fillMaxSize().padding(padding).padding(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
             Text(stringResource(R.string.add_title), style = MaterialTheme.typography.headlineSmall)
-            RepoField(url, onUrl = { url = it }, choices)
+            RepoField(field, onChange = { field = it }, choices)
             OutlinedButton(onClick = onPickFolder, enabled = !connecting) { Text(stringResource(R.string.add_folder)) }
             Text(folder?.path ?: stringResource(R.string.add_folder_none), style = MaterialTheme.typography.bodyMedium)
             Text(stringResource(R.string.add_folder_explain), style = MaterialTheme.typography.bodySmall)
@@ -92,29 +83,32 @@ private fun refusalText(reason: Connector.Refusal) = when (reason) {
 /** The URL field, which also lists the account's repos whose name or URL holds what is typed. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun RepoField(url: String, onUrl: (String) -> Unit, choices: RepoChoices) {
-    val repos = (choices as? RepoChoices.Loaded)?.repos.orEmpty()
-    val matches = repos.filter { url.isEmpty() || it.name.contains(url, ignoreCase = true) || it.url.contains(url, ignoreCase = true) }
+private fun RepoField(field: TextFieldValue, onChange: (TextFieldValue) -> Unit, choices: AccountRepos.State) {
+    val url = field.text
+    val repos = (choices as? AccountRepos.State.Loaded)?.repos.orEmpty()
+    // Most recently pushed first, so typing finds an older one; a menu of hundreds would jank as it opens
+    val matches = repos.filter { it.name.contains(url, ignoreCase = true) || it.url.contains(url, ignoreCase = true) }.take(MENU_SIZE)
     var open by remember { mutableStateOf(false) }
     val expanded = open && matches.isNotEmpty()
 
     ExposedDropdownMenuBox(expanded = expanded, onExpandedChange = { open = it }) {
         OutlinedTextField(
-            value = url,
+            value = field,
             onValueChange = {
-                onUrl(it.trim())
+                onChange(it.copy(text = it.text.trim()))
                 open = true
             },
             label = { Text(stringResource(R.string.add_url)) },
             placeholder = { Text(stringResource(R.string.add_url_hint)) },
-            trailingIcon = when (choices) {
-                RepoChoices.Loading -> ({ CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp) })
-                is RepoChoices.Loaded -> ({ ExposedDropdownMenuDefaults.TrailingIcon(expanded) })
+            trailingIcon = when {
+                choices == AccountRepos.State.Loading -> ({ CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp) })
+                repos.isNotEmpty() -> ({ ExposedDropdownMenuDefaults.TrailingIcon(expanded) })
                 else -> null
             },
-            supportingText = when (choices) {
-                is RepoChoices.Loaded -> ({ Text(stringResource(R.string.add_url_pick)) })
-                RepoChoices.Failed -> ({ Text(stringResource(R.string.add_repos_failed)) })
+            supportingText = when {
+                repos.isNotEmpty() -> ({ Text(stringResource(R.string.add_url_pick)) })
+                choices == AccountRepos.State.Failed -> ({ Text(stringResource(R.string.add_repos_failed)) })
+                choices == AccountRepos.State.SignInRefused -> ({ Text(stringResource(R.string.add_sign_in_refused), color = MaterialTheme.colorScheme.error) })
                 else -> null
             },
             singleLine = true,
@@ -126,7 +120,7 @@ private fun RepoField(url: String, onUrl: (String) -> Unit, choices: RepoChoices
                 DropdownMenuItem(
                     text = { Text(repo.name) },
                     onClick = {
-                        onUrl(repo.url)
+                        onChange(TextFieldValue(repo.url, TextRange(repo.url.length)))
                         open = false
                     },
                 )
@@ -134,3 +128,5 @@ private fun RepoField(url: String, onUrl: (String) -> Unit, choices: RepoChoices
         }
     }
 }
+
+private const val MENU_SIZE = 50

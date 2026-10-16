@@ -6,6 +6,7 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import com.sqftware.safegit.repos.AccountRepos
 import com.sqftware.safegit.repos.Connector
 import com.sqftware.safegit.repos.HostedRepo
 import org.junit.Assert.assertEquals
@@ -40,7 +41,7 @@ class AddRepoScreenTest {
         compose.setContent {
             AddRepoScreen(
                 File("/storage/emulated/0/Documents/notes"), folderUnusable = false, Connector.State.Idle,
-                onPickFolder = {}, onConnect = { connected += it }, onCancel = {}, choices = RepoChoices.Loaded(repos),
+                onPickFolder = {}, onConnect = { connected += it }, onCancel = {}, choices = AccountRepos.State.Loaded(repos),
             )
         }
 
@@ -58,7 +59,7 @@ class AddRepoScreenTest {
         compose.setContent {
             AddRepoScreen(
                 File("/storage/emulated/0/Documents/notes"), folderUnusable = false, Connector.State.Idle,
-                onPickFolder = {}, onConnect = { connected += it }, onCancel = {}, choices = RepoChoices.Failed,
+                onPickFolder = {}, onConnect = { connected += it }, onCancel = {}, choices = AccountRepos.State.Failed,
             )
         }
 
@@ -67,6 +68,15 @@ class AddRepoScreenTest {
         compose.onNodeWithText("Connect").performClick()
 
         assertEquals(listOf("https://example.com/notes.git"), connected)
+    }
+
+    @Test
+    fun saysToSignInAgainWhenGitHubRefusesIt() {
+        compose.setContent {
+            AddRepoScreen(File("/storage/emulated/0/Documents/notes"), folderUnusable = false, Connector.State.Idle, {}, {}, {}, AccountRepos.State.SignInRefused)
+        }
+
+        compose.onNodeWithText("GitHub no longer accepts this sign-in. Sign out and sign in again.").assertExists()
     }
 
     @Test
