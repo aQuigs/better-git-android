@@ -11,6 +11,7 @@ import com.sqftware.safegit.git.GitResult
  */
 internal class RepoGit(private val git: Git, val repo: Repo, private val identity: Identity) {
     val emptyTree by lazy { check("mktree").stdout.trim() }
+    val emptyBlob by lazy { check("hash-object", "-w", "--stdin").stdout.trim() }
     val ignoreCase by lazy { output("config", "--bool", "core.ignorecase") == "true" }
 
     fun run(vararg args: String, environment: Map<String, String> = emptyMap(), input: String = ""): GitResult = git.run(
@@ -29,7 +30,7 @@ internal class RepoGit(private val git: Git, val repo: Repo, private val identit
      * `merge-base` and `merge-tree` use it.
      */
     fun probe(vararg args: String): GitResult =
-        run(*args).also { if (it.exitCode !in 0..NO) throw GitFailure(args.first(), it) }
+        run(*args).also { if (it.exitCode !in 0..NO) throw GitFailure(args.first { !it.startsWith("-") && "=" !in it }, it) }
 
     /** The output of a [probe] that answered yes, or null. */
     fun output(vararg args: String) = probe(*args).takeIf { it.ok }?.stdout?.trim()
@@ -39,6 +40,27 @@ internal class RepoGit(private val git: Git, val repo: Repo, private val identit
 
     /** The branch's commit, or null before its first one. */
     fun head() = resolve("HEAD^{commit}")
+
+    /**
+     * Merges three trees. Git would guess that a file added to a folder the other side renamed belongs in the renamed
+     * one, and ask about a path neither side has; the file stays where it was added instead.
+     */
+    fun mergeTree(base: String, ours: String, theirs: String) = MergeTree.parse(
+        probe("-c", "merge.directoryRenames=false", "merge-tree", "--write-tree", "-z", "--merge-base=$base", ours, theirs),
+    )
+
+    /** [tree] with [entries], lines of `update-index -z --index-info`, applied to it. */
+    fun editTree(tree: String, entries: String): String {
+        val indexFile = repo.gitDir.resolve("safegit-edit.index")
+        val index = mapOf("GIT_INDEX_FILE" to indexFile.path)
+        try {
+            check("read-tree", tree, environment = index)
+            check("update-index", "-z", "--index-info", environment = index, input = entries)
+            return check("write-tree", environment = index).stdout.trim()
+        } finally {
+            indexFile.delete()
+        }
+    }
 
     /** Every path that differs from [from] to [to], without guessing renames. */
     fun diff(from: String, to: String): List<Change> =

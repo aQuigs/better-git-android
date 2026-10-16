@@ -74,9 +74,10 @@ internal class FolderUpdate(private val git: RepoGit) {
 
         fun run(resuming: Boolean): Result {
             if (git.ignoreCase) {
-                val clashes = caseClashes(changes.values.filter { it.new }.map { it.path }).flatten().map(changes::getValue)
+                val clashes = caseClashes(changes.values.filter { it.new }.map { it.path }).flatten().distinct()
                 if (clashes.isNotEmpty()) {
-                    return undo(emptyList()) ?: Result.Blocked(clashes.filter { !it.old }.ifEmpty { clashes }.map { it.path }.distinct())
+                    // The names the update would bring, rather than those the folder has now
+                    return undo(emptyList()) ?: Result.Blocked(clashes.filter { changes[it]?.old != true }.ifEmpty { clashes }.sorted())
                 }
             }
 

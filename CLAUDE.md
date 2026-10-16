@@ -1,6 +1,6 @@
 # better-git-android
 
-SafeGit (`com.sqftware.safegit`): git sync for Android that never loses work. One Sync button commits local edits, fetches, rebases them onto the remote and pushes. Anything that cannot be rebased cleanly is left exactly as it was and shown to the user, never overwritten. Native Kotlin + Jetpack Compose, built and tested entirely from the CLI.
+SafeGit (`com.sqftware.safegit`): git sync for Android that never loses work. One Sync button commits local edits, fetches, rebases them onto the remote and pushes. A conflict puts both versions in the file between markers, as a rebase does, or asks the user which version to keep; nothing is ever overwritten. Native Kotlin + Jetpack Compose, built and tested entirely from the CLI.
 
 ## Why it exists
 
@@ -25,7 +25,11 @@ Git Sync (ViscousPot/GitSync, Flutter + libgit2) loses work: its pull merges and
 
 1. Commit every local change, untracked files included (`add --all`). No stash and no autostash.
 2. `fetch`, then combine the local changes since the fork point with the remote's in one three-way merge (`merge-tree`, `commit-tree`). This touches neither the folder nor the branch. The fork point leaves out commits the remote dropped with a force push.
-3. On a conflict, stop and report the files. The folder, branch and remote stay as they were. The conflict clears once the files agree.
+3. A conflict works like a rebase's, with plain behavior and no guessing:
+   - Where both sides changed the same lines of a text file, the file gets both versions between markers (`<<<<<<< <device>` … `>>>>>>> remote`), and the rest of the folder updates. The branch sits on a commit holding the markers, recorded in `refs/safegit/conflict` before the folder moves, and never pushed. While a marked file has markers left, a sync does nothing. Once none has, the marked commit leaves the branch and its files are committed with the resolution.
+   - A file that would gain this device's markers is never committed, whatever its name (a note renamed before it was resolved). Markers with other labels are a note's own text.
+   - Anything markers cannot show (a binary file, an edit against a delete, a file against a folder, names that differ only by case) stops the sync with nothing changed. Each such path comes back as a `Choice` holding what each side has there, and the next sync needs a `Keep` (local or remote) for each. A choice counts only while both sides still hold what it was made against.
+   - Git's guess that a file added to a folder the other side renamed belongs in the renamed one is off (`merge.directoryRenames=false`): the file stays where it was added.
 4. Move the folder with `FolderUpdate`, never `git checkout`, which leaves a file it cannot write half written and reports it only as an error line. The old commit goes under `refs/safegit/backup/<time>` first.
    - Git writes both versions of each changed file to private staging. Each file then goes into the folder by atomic rename, and only while it still holds the old version, so a file is always wholly old or wholly new.
    - Anything else in the way (an edit since step 1, an ignored or untracked file) blocks the update before anything is written. A file changed since step 1 gets committed, and the sync tries again.
@@ -39,7 +43,7 @@ Git Sync (ViscousPot/GitSync, Flutter + libgit2) loses work: its pull merges and
 ## Open questions and risks
 
 - **Binaries:** each build takes Termux's latest packages, so security fixes arrive with Termux. git is GPLv2: the app needs a source offer naming the versions listed in `assets/git/packages`.
-- **Resolving conflicts:** the UI needs a way out of a conflict other than editing the file to match: keep both versions, or keep mine (`merge-tree -X ours`).
+- **Case twins on the remote:** a remote (from Linux) holding two names that differ only by case blocks every sync (`FOLDER_BLOCKED`) until it is fixed there. Nothing is lost, but the UI should explain it.
 - **Residual window:** a notes app saving a file in the instant between `FolderUpdate`'s last check and its rename would lose that save.
 - **Renamed only by case on the phone:** git with `core.ignorecase` never records it, so a remote change to that file blocks the sync (`FOLDER_BLOCKED`) until the name matches again. Nothing is lost, but the UI should explain it.
 - **Dropped commits:** commits the remote dropped with a force push leave the phone's branch too (kept in the backup ref). The UI should say so.
