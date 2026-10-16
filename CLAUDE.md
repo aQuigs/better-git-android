@@ -13,7 +13,7 @@ Git Sync (ViscousPot/GitSync, Flutter + libgit2) loses work: its pull merges and
   - libgit2: no autostash, no merge-ort, and its rebase detaches HEAD.
   - gitoxide: no rebase.
 - **Shell:** git's compiled-in shell is Termux's `sh`, so `fetch-git.sh` repoints it at `/system/bin/sh` in place. Hooks still fail (their `#!/bin/sh` does not exist on Android).
-- **Tests:** `SafeSyncContract` (in `sync`'s test fixtures) holds the sync rules. It runs against desktop git on the JVM and against the bundled git on the emulator, since a newer git can change behavior. On the emulator it runs twice: in app storage, and with the folder on shared storage (`SharedStorageSafeSyncTest`), which is case-insensitive and behind FUSE like a real vault. CI's Linux is case-sensitive, so only a Mac or the emulator runs the case rules.
+- **Tests:** `SafeSyncContract` (in `sync`'s test fixtures) holds the sync rules. It runs against desktop git on the JVM and against the bundled git on the emulator, since a newer git can change behavior. On the emulator it runs twice: in app storage, and with the folder on shared storage (`SharedStorageSafeSyncTest`), which is case-insensitive and behind FUSE like a real vault. CI's Linux is case-sensitive, so only a Mac or the emulator runs the case rules. `SafeSyncSoakTest` plays two phones and a laptop at random with crashes and failed writes injected. It checks that no version a phone's user wrote is ever gone, that conflicts come only from files both sides changed, and that the remote ends with every line nobody removed on purpose. A long run (`-Dsoak.seeds=40`) is the check before trusting a sync change.
 - **Engine boundary:** sync logic talks to a `Git` interface in plain Kotlin, and the CLI runner is one implementation of it.
 - **Storage:** repos live in shared storage (e.g. an Obsidian vault in `Documents/`) under the All-files access permission (`MANAGE_EXTERNAL_STORAGE`), declared as core functionality on Play. SAF cannot back git (no paths, lstat or locking). To keep object and index I/O off the slow FUSE layer, the repo's git dir sits in app-private storage and points at the shared worktree, with `core.untrackedCache` on. On the emulator with the notes repo (about 2,800 files), this split layout brings `status` from 36 ms to 9 ms, and committing 20 edits from 0.4–0.65 s to 0.14 s, compared with the whole repo in shared storage.
 - **Auth:** ease of use first. GitHub sign-in uses the OAuth device flow, which needs no client secret or backend. The token lives in the Android Keystore and reaches git through `GIT_CONFIG_COUNT`/`http.extraHeader`, never argv or a config file. HTTPS only to start; SSH (a bundled ssh client) comes later if needed.
@@ -32,6 +32,7 @@ Git Sync (ViscousPot/GitSync, Flutter + libgit2) loses work: its pull merges and
    - A failed write puts the moved files back. If the app is killed, `refs/safegit/move-from`/`move-to` let the next sync finish the update, or put it back if a file has changed since. Once the branch has moved, it is only ever finished. The index and branch move last.
    - A file only counts as a version under its exact name. On case-insensitive storage, a name that opens a file under another case is taken, unless the two are one file renamed by case. A tree holding two names that differ only by case is refused.
    - A folder in the way of a file is cleared only once it holds no files.
+   - On case-insensitive storage, a folder holds one file under either spelling of its name. So before merging, every path the remote spells in another case, by its file or a folder name, takes the remote's spelling, in the local side and the merge base alike (respelling one side alone makes git guess the rename from contents). Two files, or a file and a folder, that the local changes leave differing only by case are reported as a conflict.
 5. `push` without force. If the remote moved in the meantime, repeat from `fetch`, at most three times.
 6. A git that fails is never read as an empty answer: Android kills child processes, and one empty diff or missing HEAD would push a mass deletion. Only git's documented "no" (exit 1 from `rev-parse --verify`, `merge-base`, `diff --quiet`) counts as one. Anything else stops the sync.
 
@@ -51,6 +52,7 @@ Git Sync (ViscousPot/GitSync, Flutter + libgit2) loses work: its pull merges and
 
 ```bash
 ./gradlew testDebugUnitTest          # JVM unit tests (pre-commit runs them too)
+./gradlew :sync:testDebugUnitTest --tests '*Soak*' -Dsoak.seeds=40  # long soak run, ~15 min; -Dsoak.seed=<n> replays one
 ./gradlew assembleDebug              # → app/build/outputs/apk/debug/app-debug.apk
 ./gradlew lintDebug                  # Android lint → app/build/reports/lint-results-debug.html
 scripts/emulator-lock.sh <command>   # device work: boots this repo's AVD, runs the command, stops it

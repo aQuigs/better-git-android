@@ -32,4 +32,7 @@ dependencies {
 tasks.register<Test>("testDebugUnitTest") {
     testClassesDirs = sourceSets.test.get().output.classesDirs
     classpath = sourceSets.test.get().runtimeClasspath
+    for (name in listOf("soak.seed", "soak.seeds", "soak.rounds")) {
+        providers.systemProperty(name).orNull?.let { systemProperty(name, it) }
+    }
 }
