@@ -285,6 +285,76 @@ abstract class SafeSyncContract(tempParent: File? = null, workTreeParent: File? 
     }
 
     @Test
+    fun keepingTheRemotesDeletionLeavesACopyOfTheFileAlone() {
+        git.ok(laptop, "rm", "-q", "notes.md")
+        laptop.commitAndPush("delete notes")
+        files.write("notes.md", "one\nedited\nthree\n")
+        files.write("copy.md", "one\nedited\nthree\n")
+
+        val choice = asked(sync()).single()
+
+        // Without notes.md, git could take copy.md for notes.md renamed, which conflicts with its deletion again
+        assertEquals(SyncResult.Synced(pulled = 1, pushed = 1), sync(choices = mapOf(choice to Keep.REMOTE)))
+        assertFalse(files.resolve("notes.md").exists())
+        laptopPull()
+        assertEquals("one\nedited\nthree\n", laptop.read("copy.md"))
+    }
+
+    @Test
+    fun takesTheRemotesChangeToAFileRenamedOnlyByCase() {
+        // Git with core.ignorecase never records such a rename, so HEAD keeps notes.md
+        files.resolve("notes.md").renameTo(files.resolve("NOTES.md"))
+        laptop.write("notes.md", "one, edited on the laptop\ntwo\nthree\n")
+        laptop.commitAndPush("laptop edit")
+
+        val result = sync()
+
+        if (caseInsensitive) {
+            assertEquals(SyncResult.Synced(pulled = 1, pushed = 0), result)
+            assertTrue("notes.md" in files.list().orEmpty())
+            assertEquals("one, edited on the laptop\ntwo\nthree\n", files.read("notes.md"))
+            assertEquals("", phoneGit("status", "--porcelain"))
+        }
+    }
+
+    @Test
+    fun takesTheRemotesRenameByCaseOfAFileRenamedOnlyByCaseHere() {
+        files.resolve("notes.md").renameTo(files.resolve("NOTES.md"))
+        git.ok(laptop, "mv", "notes.md", "Notes.md")
+        laptop.write("Notes.md", "one, edited on the laptop\ntwo\nthree\n")
+        laptop.commitAndPush("laptop rename by case and edit")
+
+        val result = sync()
+
+        if (caseInsensitive) {
+            assertEquals(SyncResult.Synced(pulled = 1, pushed = 0), result)
+            assertTrue("Notes.md" in files.list().orEmpty())
+            assertEquals("one, edited on the laptop\ntwo\nthree\n", files.read("Notes.md"))
+        }
+    }
+
+    @Test
+    fun answersAChoiceThatKeepingAnotherRaises() {
+        val photo = ByteArray(2000) { (it % 251).toByte() }
+        laptop.resolve("photo.png").writeBytes(photo)
+        laptop.commitAndPush("photo")
+        sync()
+        val laptops = photo.copyOf().also { it[0] = 9 }
+        laptop.resolve("photo.png").writeBytes(laptops)
+        laptop.commitAndPush("laptop photo")
+        // Renamed and edited a little on the phone, so git still pairs the rename
+        files.resolve("photo.png").renameTo(files.resolve("pic.png"))
+        files.resolve("pic.png").writeBytes(photo.copyOf().also { it[1999] = 7 })
+
+        var result = sync()
+        repeat(3) { (result as? SyncResult.Choose)?.let { asked -> result = sync(choices = asked.choices.associateWith { Keep.REMOTE }) } }
+
+        assertTrue(result.toString(), result is SyncResult.Synced || result == SyncResult.UpToDate)
+        assertTrue(laptops.contentEquals(files.resolve("photo.png").readBytes()))
+        assertFalse(files.resolve("pic.png").exists())
+    }
+
+    @Test
     fun aChoiceCountsOnlyForAConflictThereIsNow() {
         laptop.write("laptop.md", "the remote moved on\n")
         laptop.commitAndPush("laptop file")

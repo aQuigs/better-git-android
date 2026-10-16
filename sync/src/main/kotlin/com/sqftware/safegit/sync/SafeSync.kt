@@ -281,14 +281,18 @@ class SafeSync(
 
             var merge = git.mergeTree(mergeBase, ours, upstreamHead)
             var asked = ask(unresolved(merge, spelling), ours, upstreamHead)
-            // A choice made against other versions could undo an edit made since, so those are asked again
-            if (asked.isNotEmpty() && asked.all { it in choices }) {
-                val (keptOurs, keptTheirs) = keep(asked.associate { it.path to choices.getValue(it) }, ours, upstreamHead)
-                merge = git.mergeTree(mergeBase, keptOurs, keptTheirs)
+            // A choice made against other versions could undo an edit made since, so those are asked again. Keeping one
+            // side can raise a choice of its own, such as the other end of a rename, so rounds go on while each is answered
+            val answered = mutableMapOf<Choice, Keep>()
+            while (asked.isNotEmpty() && asked.all { it in choices } && !answered.keys.containsAll(asked)) {
+                asked.associateWithTo(answered) { choices.getValue(it) }
+                val (keptBase, keptOurs, keptTheirs) = keep(answered, mergeBase, ours, upstreamHead)
+                merge = git.mergeTree(keptBase, keptOurs, keptTheirs)
                 asked = ask(unresolved(merge, spelling), ours, upstreamHead)
             }
             if (asked.isNotEmpty()) {
-                return Combined.Choose(asked)
+                // With those already answered, as the next sync must apply them again to reach these
+                return Combined.Choose((answered.keys + asked).distinct())
             }
 
             if (merge.marked.isNotEmpty()) {
@@ -321,22 +325,29 @@ class SafeSync(
             paths.map { Choice(it, git.resolve("$ours:$it"), git.resolve("$theirs:$it")) }.filter { it.local != null || it.remote != null }
 
         /**
-         * [ours] and [theirs] with each chosen path, a file or everything in a folder, made the same on both sides: the
-         * kept side's version replaces the other's, so the merge takes it.
+         * [base], [ours] and [theirs] with each chosen path, a file or everything in a folder, made the same on both
+         * sides: the kept side's version replaces the other's, so the merge takes it. A path kept deleted goes from the
+         * base too, or git could take a file elsewhere for it renamed, which conflicts with the deletion again.
          */
-        private fun keep(kept: Map<String, Keep>, ours: String, theirs: String): Pair<String, String> {
+        private fun keep(kept: Map<Choice, Keep>, base: String, ours: String, theirs: String): Triple<String, String, String> {
             val differences = git.diff(ours, theirs)
-            fun replacing(keep: Keep): String = kept.filterValues { it == keep }.keys
-                .flatMap { path -> differences.filter { it.path == path || it.path.startsWith("$path/") } }
-                .map { if (keep == Keep.LOCAL) Triple(it.oldMode, it.oldBlob, it.path) else Triple(it.newMode, it.newBlob, it.path) }
-                // Removals first, so that a file never meets the folder it replaces
-                .sortedBy { (mode) -> mode != Change.ABSENT }
-                .joinToString("") { (mode, blob, path) -> indexEntry(mode, blob, path) }
-            val intoOurs = replacing(Keep.REMOTE)
-            val intoTheirs = replacing(Keep.LOCAL)
-            return Pair(
-                if (intoOurs.isEmpty()) ours else git.editTree(ours, intoOurs),
-                if (intoTheirs.isEmpty()) theirs else git.editTree(theirs, intoTheirs),
+            fun replacing(tree: String, keep: Keep): String {
+                val entries = kept.filterValues { it == keep }.keys
+                    .flatMap { choice -> differences.filter { it.path == choice.path || it.path.startsWith("${choice.path}/") } }
+                    .map { if (keep == Keep.LOCAL) Triple(it.oldMode, it.oldBlob, it.path) else Triple(it.newMode, it.newBlob, it.path) }
+                    // Removals first, so that a file never meets the folder it replaces
+                    .sortedBy { (mode) -> mode != Change.ABSENT }
+                    .joinToString("") { (mode, blob, path) -> indexEntry(mode, blob, path) }
+                return if (entries.isEmpty()) tree else git.editTree(tree, entries)
+            }
+
+            val gone = kept.filter { (choice, keep) -> (if (keep == Keep.LOCAL) choice.local else choice.remote) == null }.keys.map { it.path }
+            val fromBase = if (gone.isEmpty()) "" else git.check("--literal-pathspecs", "ls-tree", "-r", "-z", base, "--", *gone.toTypedArray())
+                .stdout.paths().joinToString("") { indexEntry(Change.ABSENT, it.substringBefore('\t').split(' ')[2], it.substringAfter('\t')) }
+            return Triple(
+                if (fromBase.isEmpty()) base else git.editTree(base, fromBase),
+                replacing(ours, Keep.REMOTE),
+                replacing(theirs, Keep.LOCAL),
             )
         }
 

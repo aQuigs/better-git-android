@@ -21,7 +21,9 @@ import java.nio.file.attribute.BasicFileAttributes
  * followed, so after a kill the next sync finishes it or puts it back.
  *
  * Shared storage is case-insensitive, so a file only counts as some version when its own name matches exactly. A name
- * that opens a file under another case is taken, unless the two names are one file being renamed by case.
+ * that opens a file under another case is taken, unless the two names are one file being renamed by case. Git with
+ * core.ignorecase never records a rename by case alone, so a file the folder holds under another case, with exactly the
+ * old version, first gets the old spelling back, as desktop git's checkout would give it.
  */
 internal class FolderUpdate(private val git: RepoGit) {
     sealed interface Result {
@@ -83,6 +85,7 @@ internal class FolderUpdate(private val git: RepoGit) {
 
             stage(from, Side.FROM)
             stage(to, Side.TO)
+            if (git.ignoreCase) restoreSpellings()
 
             // One look at every file before anything is written; place() looks at each again right before its write
             val states = changes.keys.associateWith { state(it) }
@@ -114,6 +117,23 @@ internal class FolderUpdate(private val git: RepoGit) {
             git.check("update-ref", "HEAD", to)
             finish()
             return Result.Done
+        }
+
+        private fun restoreSpellings() {
+            for (path in changes.keys) {
+                val old = version(Side.FROM, path) ?: continue
+                val file = workTree.resolve(path)
+                val folder = file.parentFile
+                if (file.name in listing(folder)) continue
+                val other = listing(folder).singleOrNull { it.equals(file.name, ignoreCase = true) } ?: continue
+                // A spelling the update has a version for is the update's to handle
+                if (File(path).resolveSibling(other).invariantSeparatorsPath in changes) continue
+                val spelled = folder.resolve(other).toPath()
+                if (!Files.isRegularFile(spelled, NOFOLLOW_LINKS) || Files.size(spelled) != Files.size(old) || !sameBytes(spelled, old)) continue
+                Files.move(spelled, file.toPath(), ATOMIC_MOVE)
+                // Listed again rather than assumed: where names fold, a rename by case may do nothing
+                listings.remove(folder)
+            }
         }
 
         /** Puts [moved] files back to their old versions, leaving any that changed since; null once done. */
