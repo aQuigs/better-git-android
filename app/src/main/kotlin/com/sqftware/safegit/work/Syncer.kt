@@ -30,7 +30,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.concurrent.ConcurrentHashMap
 
-/** Where a repo's sync stands: running, or the last one's result. */
+/** Where a repo's sync stands: waiting to start, running, or the last one's result. */
 sealed interface SyncState {
     /** Asked for, but Android has not started it yet. */
     data object Waiting : SyncState
@@ -78,8 +78,10 @@ class WorkSyncer(context: Context, repos: RepoStore, private val records: SyncRe
         }
     }
 
-    private fun syncState(info: WorkInfo) = when (info.state) {
-        WorkInfo.State.RUNNING -> SyncState.Running(info.progress.getString(SyncWorker.STEP)?.let(Step::valueOf))
+    private fun syncState(info: WorkInfo) = when {
+        info.state == WorkInfo.State.RUNNING -> SyncState.Running(info.progress.getString(SyncWorker.STEP).let { name -> Step.entries.find { it.name == name } })
+        // A stopped worker's git runs on while the work waits to be run again, so it has started all the same
+        info.runAttemptCount > 0 -> SyncState.Running(null)
         else -> SyncState.Waiting
     }
 

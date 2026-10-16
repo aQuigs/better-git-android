@@ -378,9 +378,11 @@ abstract class SafeSyncContract(tempParent: File? = null, workTreeParent: File? 
         laptop.commitAndPush("laptop work")
         val editsDuringUpdate = git.beforeFirst({ "diff-tree" in it }) { files.write("notes.md", "edited mid-sync\n") }
 
-        val result = sync(editsDuringUpdate)
+        val steps = mutableListOf<Step>()
+        val result = sync(editsDuringUpdate, step = steps::add)
 
         assertTrue(result.toString(), result is SyncResult.Conflict)
+        assertEquals(listOf(Step.COMMIT, Step.FETCH, Step.MERGE, Step.UPDATE_FOLDER, Step.COMMIT, Step.MERGE, Step.UPDATE_FOLDER), steps)
         assertTrue(files.read("notes.md"), "edited mid-sync\n" in files.read("notes.md"))
     }
 
@@ -470,7 +472,9 @@ abstract class SafeSyncContract(tempParent: File? = null, workTreeParent: File? 
 
         assertThrows(Killed::class.java) { sync(git.dyingAtTheLastStep()) }
 
-        assertEquals(SyncResult.UpToDate, sync())
+        val steps = mutableListOf<Step>()
+        assertEquals(SyncResult.UpToDate, sync(step = steps::add))
+        assertEquals(listOf(Step.UPDATE_FOLDER, Step.COMMIT, Step.FETCH), steps)
         assertEquals("ONE\ntwo\nthree\n", files.read("notes.md"))
         assertEquals("from the laptop", files.read("laptop.md"))
         assertEquals(git.ok(remote, "rev-parse", "main"), phoneGit("rev-parse", "HEAD"))

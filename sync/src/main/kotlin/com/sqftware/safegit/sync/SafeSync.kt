@@ -96,7 +96,7 @@ class SafeSync(
 ) {
     private val message = "Changes from $device"
 
-    /** Calls [step] as it starts each step, on the thread running the sync. */
+    /** Calls [step] as it starts each step, finishing a folder update a killed sync left too, on the thread running the sync. */
     fun sync(
         repo: Repo,
         credentials: Credentials = Credentials.NONE,
@@ -133,7 +133,7 @@ class SafeSync(
             val merge = config["branch.$branch.merge"] ?: return SyncResult.Failed(Problem.NO_UPSTREAM)
             val upstream = "refs/remotes/$remote/${merge.removePrefix("refs/heads/")}"
 
-            folder.resume()?.let { return SyncResult.Failed(Problem.FOLDER_WRITE, it.detail) }
+            folder.resume { step(Step.UPDATE_FOLDER) }?.let { return SyncResult.Failed(Problem.FOLDER_WRITE, it.detail) }
             held.left()?.let { return SyncResult.Conflict(it) }
 
             var pulled = 0
@@ -176,6 +176,7 @@ class SafeSync(
                         is FolderUpdate.Result.WriteFailed -> return SyncResult.Failed(Problem.FOLDER_WRITE, moved.detail)
                         // Usually a file changed after the commit, e.g. a notes app saved it: commit that too and retry
                         is FolderUpdate.Result.Blocked -> {
+                            step(Step.COMMIT)
                             stageLocalChanges().takeIf { it.isNotEmpty() }?.let { return SyncResult.Conflict(it) }
                             if (!commitStaged()) {
                                 return SyncResult.Failed(Problem.FOLDER_BLOCKED, moved.paths.joinToString("\n"))
