@@ -1,9 +1,7 @@
 package com.sqftware.safegit.auth
 
+import com.sqftware.safegit.net.fetchJson
 import org.json.JSONObject
-import java.io.IOException
-import java.net.HttpURLConnection
-import java.net.URI
 import java.net.URLEncoder
 
 /** A GitHub account the app syncs as. */
@@ -39,7 +37,7 @@ interface DeviceFlow {
 
 /**
  * GitHub's OAuth device flow, which needs only the OAuth app's public client id, no secret and no backend. Every call
- * blocks on the network and throws [IOException] when it fails, or a JSONException for an answer it cannot read.
+ * blocks on the network and throws [java.io.IOException] when it fails, or a JSONException for an answer it cannot read.
  */
 class GitHubDeviceFlow(
     private val clientId: String,
@@ -73,33 +71,10 @@ class GitHubDeviceFlow(
     }
 
     override fun account(token: String): Account {
-        val json = request("$api/user", body = null, "Authorization" to "Bearer $token")
+        val json = JSONObject(fetchJson("$api/user", body = null, "Authorization" to "Bearer $token"))
         return Account(json.getString("login"), json.getLong("id"), json.optString("name").takeIf { !json.isNull("name") && it.isNotEmpty() })
     }
 
     private fun post(url: String, vararg form: Pair<String, String>) =
-        request(url, form.joinToString("&") { (key, value) -> "$key=${URLEncoder.encode(value, "UTF-8")}" })
-
-    private fun request(url: String, body: String?, vararg headers: Pair<String, String>): JSONObject {
-        val connection = URI(url).toURL().openConnection() as HttpURLConnection
-        try {
-            connection.connectTimeout = TIMEOUT
-            connection.readTimeout = TIMEOUT
-            connection.setRequestProperty("Accept", "application/json")
-            for ((key, value) in headers) connection.setRequestProperty(key, value)
-            if (body != null) {
-                connection.requestMethod = "POST"
-                connection.doOutput = true
-                connection.outputStream.use { it.write(body.toByteArray()) }
-            }
-            if (connection.responseCode !in 200..299) throw IOException("$url answered ${connection.responseCode}")
-            return JSONObject(connection.inputStream.bufferedReader().readText())
-        } finally {
-            connection.disconnect()
-        }
-    }
-
-    private companion object {
-        const val TIMEOUT = 15_000
-    }
+        JSONObject(fetchJson(url, form.joinToString("&") { (key, value) -> "$key=${URLEncoder.encode(value, "UTF-8")}" }))
 }

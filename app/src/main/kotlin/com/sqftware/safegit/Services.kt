@@ -9,6 +9,8 @@ import com.sqftware.safegit.git.BundledGit
 import com.sqftware.safegit.git.Git
 import com.sqftware.safegit.repos.Connector
 import com.sqftware.safegit.repos.FileRepoStore
+import com.sqftware.safegit.repos.GitHubRepoDirectory
+import com.sqftware.safegit.repos.RepoDirectory
 import com.sqftware.safegit.repos.RepoStore
 import com.sqftware.safegit.repos.SavedRepo
 import com.sqftware.safegit.sync.Identity
@@ -41,6 +43,7 @@ class Services private constructor(context: Context) {
         KeystoreTokenStore(context.filesDir.resolve("github.json")),
         scope,
     )
+    val directory: RepoDirectory = GitHubRepoDirectory()
     val syncer: Syncer = WorkSyncer(context, repos, records, scope)
 
     // Connecting commits nothing, so who it runs as never shows

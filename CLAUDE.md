@@ -81,7 +81,8 @@ app/src/main/kotlin/com/sqftware/safegit/
 ├── auth/                # GitHub device-flow sign-in, and the token in the Keystore
 ├── Services.kt          # the app's singletons: repo store, sync records, bundled git
 ├── git/BundledGit.kt    # sets up the git binaries shipped as native libraries
-├── repos/               # the connected repos, saved as JSON, and Connector, which adds one
+├── net/                 # one HTTP request, for GitHub's sign-in and API
+├── repos/               # the connected repos, saved as JSON; Connector, which adds one; the account's repos to pick from
 ├── storage/             # all-files access, folder picker URI → path, atomic JSON files
 ├── work/                # each sync as WorkManager work, and its saved result and choices
 └── ui/                  # Compose screens, tested with fake data

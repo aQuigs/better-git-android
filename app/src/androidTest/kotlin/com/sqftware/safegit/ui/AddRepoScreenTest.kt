@@ -7,6 +7,7 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.sqftware.safegit.repos.Connector
+import com.sqftware.safegit.repos.HostedRepo
 import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
@@ -30,6 +31,42 @@ class AddRepoScreenTest {
         compose.onNodeWithText("Connect").performClick()
 
         assertEquals(listOf("https://github.com/me/notes.git"), connected)
+    }
+
+    @Test
+    fun picksOneOfTheAccountsRepos() {
+        val connected = mutableListOf<String>()
+        val repos = listOf(HostedRepo("me/notes", "https://github.com/me/notes.git"), HostedRepo("me/blog", "https://github.com/me/blog.git"))
+        compose.setContent {
+            AddRepoScreen(
+                File("/storage/emulated/0/Documents/notes"), folderUnusable = false, Connector.State.Idle,
+                onPickFolder = {}, onConnect = { connected += it }, onCancel = {}, choices = RepoChoices.Loaded(repos),
+            )
+        }
+
+        compose.onNodeWithText("Repo URL").performTextInput("NOT")
+        compose.onNodeWithText("me/blog").assertDoesNotExist()
+        compose.onNodeWithText("me/notes").performClick()
+        compose.onNodeWithText("Connect").performClick()
+
+        assertEquals(listOf("https://github.com/me/notes.git"), connected)
+    }
+
+    @Test
+    fun takesAPastedUrlWhenTheReposCannotBeListed() {
+        val connected = mutableListOf<String>()
+        compose.setContent {
+            AddRepoScreen(
+                File("/storage/emulated/0/Documents/notes"), folderUnusable = false, Connector.State.Idle,
+                onPickFolder = {}, onConnect = { connected += it }, onCancel = {}, choices = RepoChoices.Failed,
+            )
+        }
+
+        compose.onNodeWithText("Couldn't list your GitHub repos. Paste the URL instead.").assertExists()
+        compose.onNodeWithText("Repo URL").performTextInput("https://example.com/notes.git")
+        compose.onNodeWithText("Connect").performClick()
+
+        assertEquals(listOf("https://example.com/notes.git"), connected)
     }
 
     @Test
