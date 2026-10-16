@@ -41,19 +41,31 @@ internal class SubmoduleSync(
      */
     fun bringUp(): SyncResult? {
         ready.clear()
+        problems.clear()
         // Every submodule set up here has its git dir there, so a repo with none costs no more git
         val any = git.repo.gitDir.resolve("modules").isDirectory
         records = if (any) readRecords() else emptyMap()
-        declared = git.head()?.let { submodules.of(it) }.orEmpty()
+        val head = git.head()
+        declared = head?.let { submodules.of(it) }.orEmpty()
 
-        val names = declared.map { it.name }.toSet()
+        // Git dirs go by name and folders by path, so one renamed or moved is taken out and starts afresh
+        val waitingNames = mutableSetOf<String>()
+        val waitingPaths = mutableSetOf<String>()
         for ((name, record) in records) {
             val path = record[PATH] ?: continue
-            if (name in names) continue
-            val there = git.resolve("HEAD:$path")
-            attempt(path) { retire(name, path, there.tree(git) ?: git.emptyTree, keepFolder = there != null) }?.let { return it }
+            if (declared.any { it.name == name && it.path == path }) continue
+            val there = head?.let { git.entry(it, path) }
+            attempt(path) { retire(name, path, there?.tree ?: git.emptyTree, keepFolder = there != null) }?.let { return it }
+            if (path in problems) {
+                waitingNames += name
+                waitingPaths += path
+            }
         }
         for (submodule in declared) {
+            if (submodule.name in waitingNames || submodule.path in waitingPaths) {
+                problems.putIfAbsent(submodule.path, "Waiting for the submodule that was there before to be taken out.")
+                continue
+            }
             attempt(submodule.path) { bringUp(submodule) }?.let { return it }
         }
         return null
@@ -72,8 +84,10 @@ internal class SubmoduleSync(
     fun beforeMove(from: String?, to: String) {
         val before = from?.let { submodules.of(it) }.orEmpty().associate { it.path to it.commit }
         for (submodule in submodules.of(to)) {
-            if (before[submodule.path] != submodule.commit && submodules.isSetUp(submodule)) {
+            val old = before[submodule.path]
+            if (old != submodule.commit && submodules.isSetUp(submodule)) {
                 git.check("config", key(submodule.name, FOLLOW), submodule.commit)
+                if (old != null) git.check("config", key(submodule.name, FROM), old)
             }
         }
     }
@@ -91,17 +105,40 @@ internal class SubmoduleSync(
         val sub = git.at(submodules.repo(submodule))
         FolderUpdate(sub).resume()?.let { throw Skip(it.detail) }
         val inner = SubmoduleSync(sub, credentials, within(submodule.path), step, now, sync)
+        val record = records[submodule.name].orEmpty()
 
-        val follow = records[submodule.name]?.get(FOLLOW)
-        if (hasWorkOfItsOwn(sub, submodule.commit, untracked = { true })) {
-            syncWork(sub, submodule.path)?.let { return it }
-        } else {
-            if (new || follow == submodule.commit) follow(sub, inner, submodule.commit)
-            inner.bringUp()?.let { return it.within(submodule.path) }
-            inner.problems.forEach { (path, problem) -> problems["${submodule.path}/$path"] = problem }
+        if (hasWorkOfItsOwn(sub, submodule.commit, untracked = { true })) syncWork(sub, submodule.path)?.let { return it }
+        val head = sub.head()
+        // The repo's update moved it, or it is new here: it takes the recorded commit, unless this device moved it too
+        if (head != submodule.commit && (new || head == null || record[FOLLOW] == submodule.commit)) {
+            settle(sub, inner, submodule, head, from = record[FROM])?.let { return it }
         }
-        if (follow != null) git.check("config", "--unset", key(submodule.name, FOLLOW))
+        for (variable in listOf(FOLLOW, FROM)) {
+            if (variable in record) git.check("config", "--unset", key(submodule.name, variable))
+        }
+
+        inner.bringUp()?.let { return it.within(submodule.path) }
+        inner.problems.forEach { (path, problem) -> problems["${submodule.path}/$path"] = problem }
         sub.head()?.let { ready[submodule.path] = it }
+        return null
+    }
+
+    /**
+     * Moves the submodule from [head] to the commit the repo records, or keeps [head] where it builds on that commit.
+     * Where this device and the remote moved it apart, [head] having left [from], it is a choice.
+     */
+    private fun settle(sub: RepoGit, inner: SubmoduleSync, submodule: Submodule, head: String?, from: String?): SyncResult? {
+        val commit = submodule.commit
+        fetchCommit(sub, commit)
+        when {
+            head == null || head == from || sub.isAncestor(head, commit) -> follow(sub, inner, head, commit)
+            sub.isAncestor(commit, head) -> Unit
+            else -> when (choices[Choice(submodule.path, local = head, remote = commit)]) {
+                Keep.LOCAL -> Unit
+                Keep.REMOTE -> follow(sub, inner, head, commit)
+                null -> return SyncResult.Choose(listOf(Choice(submodule.path, local = head, remote = commit)))
+            }
+        }
         return null
     }
 
@@ -110,27 +147,29 @@ internal class SubmoduleSync(
         val repo = submodules.repo(submodule)
         val pointer = submodules.pointer(submodule)
         if (pointer.isDirectory) throw Skip("Its folder has a repo of its own, which SafeGit leaves alone.")
+        // One of this repo's own git dirs is never taken over: it is a submodule an earlier set-up or take-out left
+        if (pointer.isFile && submodules.pointsIntoRepo(pointer)) pointer.delete()
         // Left by a sync killed while setting it up, or by a submodule taken out before: kept, out of the way
         if (repo.gitDir.exists()) moveAside(repo.gitDir)
 
         repo.workTree.mkdirs()
         val setUp = RepoSetup(git.cli, git.identity).connect(submodule.url, repo.gitDir, repo.workTree, credentials, submodule.branch, submodule = true)
         if (setUp is RepoSetup.Result.Failed) throw Skip(setUp.detail.ifEmpty { "It could not be set up." })
+        fetch(git.at(repo))
+        // Last, so that until the set-up is whole the next sync starts it again
         git.check("config", key(submodule.name, PATH), submodule.path)
         pointer.writeText(submodules.pointerText(submodule))
-
-        fetch(git.at(repo))
     }
 
-    private fun follow(sub: RepoGit, inner: SubmoduleSync, commit: String) {
-        val head = sub.head()
-        if (head == commit) return
-        if (sub.resolve("$commit^{commit}") == null) {
-            fetch(sub)
-            // A commit on no branch is fetched by its id, which GitHub allows for any commit it holds
-            if (sub.resolve("$commit^{commit}") == null) fetch(sub, commit, required = false)
-            if (sub.resolve("$commit^{commit}") == null) throw Skip("Its remote has no commit $commit. Push it from where it was made.")
-        }
+    private fun fetchCommit(sub: RepoGit, commit: String) {
+        if (sub.resolve("$commit^{commit}") != null) return
+        fetch(sub)
+        // A commit on no branch is fetched by its id, which GitHub allows for any commit it holds
+        if (sub.resolve("$commit^{commit}") == null) fetch(sub, commit, required = false)
+        if (sub.resolve("$commit^{commit}") == null) throw Skip("Its remote has no commit $commit. Push it from where it was made.")
+    }
+
+    private fun follow(sub: RepoGit, inner: SubmoduleSync, head: String?, commit: String) {
         inner.beforeMove(head, commit)
         step(Step.UPDATE_FOLDER)
         move(sub, head, commit)
@@ -174,11 +213,11 @@ internal class SubmoduleSync(
                 syncWork(sub, path)?.let { return it }
             }
 
-            val inner = SubmoduleSync(sub, credentials, emptyMap(), step, now, sync)
+            val inner = SubmoduleSync(sub, credentials, within(path), step, now, sync)
             for ((innerName, record) in inner.readRecords()) {
                 val innerPath = record[PATH] ?: continue
-                val there = sub.resolve("$keep:$innerPath")
-                inner.retire(innerName, innerPath, there.tree(sub) ?: sub.emptyTree, keepFolder = there != null)?.let { return it.within(path) }
+                val there = sub.entry(keep, innerPath)
+                inner.retire(innerName, innerPath, there?.tree ?: sub.emptyTree, keepFolder = there != null)?.let { return it.within(path) }
             }
 
             val head = sub.head()
@@ -230,8 +269,15 @@ internal class SubmoduleSync(
         return sub.check("rev-list", "-n", "1", head, "--not", "--remotes", *known.toTypedArray()).stdout.isNotBlank()
     }
 
-    /** The tree this object is, or null for anything else, such as a submodule's commit. */
-    private fun String?.tree(git: RepoGit) = this?.let { git.output("cat-file", "-t", it) }?.takeIf { it == "tree" }?.let { this }
+    private class Entry(val type: String, val id: String) {
+        val tree get() = id.takeIf { type == "tree" }
+    }
+
+    /** What [treeish] holds at [path]: a tree, a file, or a submodule's commit, which this repo never has. */
+    private fun RepoGit.entry(treeish: String, path: String) = check("ls-tree", "-z", treeish, "--", path).stdout.paths().firstOrNull()
+        ?.substringBefore('\t')?.split(' ')?.let { Entry(type = it[1], id = it[2]) }
+
+    private fun RepoGit.isAncestor(ancestor: String, of: String) = probe("merge-base", "--is-ancestor", ancestor, of).exitCode == 0
 
     private fun readRecords(): Map<String, Map<String, String>> =
         git.output("config", "--null", "--get-regexp", "^$SET_UP\\.")?.paths().orEmpty()
@@ -255,10 +301,14 @@ internal class SubmoduleSync(
     }
 
     private companion object {
-        /** Where a repo's config keeps each submodule set up in its folder: `<SET_UP>.<name>.<PATH|FOLLOW>`. */
+        /**
+         * Where a repo's config keeps each submodule set up in its folder, `<SET_UP>.<name>.<variable>`: its [PATH], and
+         * while it has yet to follow an update of the repo, the commit to [FOLLOW] and the one it moves [FROM].
+         */
         const val SET_UP = "safegit-submodule"
         const val PATH = "path"
         const val FOLLOW = "follow"
+        const val FROM = "from"
 
         fun key(name: String, variable: String) = "$SET_UP.$name.$variable"
     }

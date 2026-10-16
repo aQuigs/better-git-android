@@ -43,7 +43,8 @@ Git Sync (ViscousPot/GitSync, Flutter + libgit2) loses work: its pull merges and
    - The parent's `add` leaves submodule folders out; what it records for each is decided explicitly, never guessed from the folder.
    - Before the parent commits, a submodule with work of its own (edits, or commits on no remote) gets a whole sync, so the parent only ever records a commit on the submodule's remote. Its work is synced only onto the branch the recorded commit is on.
    - A submodule the parent's update moved follows to the new commit through `FolderUpdate`. The commit to follow sits in the parent's config until reached, so a kill in between never records the old one back. Otherwise the submodule's commit is this device's, and gets recorded.
-   - Where both sides moved a submodule, git keeps the commit that holds the other's; otherwise it is a `Choice`.
+   - Where both sides moved a submodule, the commit that holds the other's wins; otherwise it is a `Choice`, whether the parent's merge or a pending follow finds it.
+   - Git dirs go by name and folders by path, so a submodule renamed or moved is taken out and set up afresh. A `.git` file naming one of the parent's own git dirs is never taken over.
    - A submodule the parent no longer declares has its files taken out by `FolderUpdate`, its work synced first, on a detached HEAD so the removal is never pushed. The files the parent itself now has there stay, and files only the submodule had (ignored ones) stop it.
    - A conflict or choice inside a submodule stops the sync. Any other trouble with one (out of reach, a `.git` directory of its own, files in the way) leaves it unrecorded while the rest syncs, and the sync ends `SUBMODULE`.
 7. A git that fails is never read as an empty answer: Android kills child processes, and one empty diff or missing HEAD would push a mass deletion. Only git's documented "no" (exit 1 from `rev-parse --verify`, `merge-base`, `diff --quiet`) counts as one. Anything else stops the sync.
@@ -53,6 +54,7 @@ Git Sync (ViscousPot/GitSync, Flutter + libgit2) loses work: its pull merges and
 - **Binaries:** each build takes Termux's latest packages, so security fixes arrive with Termux. git is GPLv2: the app needs a source offer naming the versions listed in `assets/git/packages`.
 - **Case twins on the remote:** a remote (from Linux) holding two names that differ only by case blocks every sync (`FOLDER_BLOCKED`) until it is fixed there. Nothing is lost, but the UI should explain it.
 - **Residual window:** a notes app saving a file in the instant between `FolderUpdate`'s last check and its rename would lose that save.
+- **Submodule turned into a folder:** when the remote replaces a submodule with plain files that differ from the submodule's, the update is blocked (`FOLDER_BLOCKED`) for good, since the submodule is taken out only after the parent's update. Nothing is lost.
 - **Renamed only by case on the phone:** git with `core.ignorecase` never records it, so a remote change to that file blocks the sync (`FOLDER_BLOCKED`) until the name matches again. Nothing is lost, but the UI should explain it.
 - **Dropped commits:** commits the remote dropped with a force push leave the phone's branch too (kept in the backup ref). The UI should say so.
 - **Backup refs** are never pruned yet.

@@ -51,6 +51,12 @@ internal class Submodules(private val git: RepoGit) {
 
     fun pointerText(submodule: Submodule) = "gitdir: ${repo(submodule).gitDir.path}\n"
 
+    /** Whether [pointer], a `.git` file, names a git dir inside this repo's, as only this app's own set-ups do. */
+    fun pointsIntoRepo(pointer: File): Boolean {
+        val target = pointer.readText().lineSequence().firstOrNull()?.removePrefix("gitdir: ") ?: return false
+        return (File(target).takeIf(File::isAbsolute) ?: pointer.parentFile.resolve(target)).canonicalPath.startsWith(git.repo.gitDir.canonicalPath + File.separator)
+    }
+
     fun isSetUp(submodule: Submodule) = repo(submodule).gitDir.isDirectory && pointer(submodule).let { it.isFile && it.readText() == pointerText(submodule) }
 
     companion object {

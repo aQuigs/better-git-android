@@ -41,6 +41,9 @@ class GitCall(val args: List<String>, val environment: Map<String, String>, val 
     /** FolderUpdate's write of the repo's own index, its step after the folder moved; scratch indexes don't count. */
     val updatesIndex get() = "--index-info" in args && "GIT_INDEX_FILE" !in environment
     val movesBranch get() = "update-ref" in args && "HEAD" in args
+
+    /** Run in a submodule's repo, whose git dir sits under its parent's modules/. */
+    val inSubmodule get() = args.any { it.startsWith("--git-dir=") && "/modules/" in it }
 }
 
 /** Stands in for the system killing the app. */
