@@ -80,7 +80,7 @@ private fun App(services: Services) {
     }
 
     if (adding) {
-        AddRepo(services.connector, connecting, onDone = { adding = false })
+        AddRepo(services, connecting, onDone = { adding = false })
     } else {
         Repos(services, onAdd = { adding = true })
     }
@@ -118,7 +118,9 @@ private fun openCode(context: Context, code: DeviceCode) {
 }
 
 @Composable
-private fun AddRepo(connector: Connector, state: Connector.State, onDone: () -> Unit) {
+private fun AddRepo(services: Services, state: Connector.State, onDone: () -> Unit) {
+    val connector = services.connector
+    val choices by services.accountRepos.state.collectAsState()
     var folder by rememberSaveable { mutableStateOf<String?>(null) }
     var unusable by rememberSaveable { mutableStateOf(false) }
     val pick = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { tree ->
@@ -141,6 +143,7 @@ private fun AddRepo(connector: Connector, state: Connector.State, onDone: () -> 
         onPickFolder = { pick.launch(null) },
         onConnect = { url -> folder?.let { connector.connect(url, File(it)) } },
         onCancel = cancel,
+        choices = choices,
     )
 }
 

@@ -4,6 +4,7 @@ import com.sun.net.httpserver.HttpServer
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Test
+import java.io.IOException
 import java.net.InetSocketAddress
 import java.net.URLDecoder
 
@@ -44,6 +45,11 @@ class GitHubDeviceFlowTest {
 
         assertEquals(mapOf("client_id" to "client1", "scope" to "repo"), forms.first())
         assertEquals("urn:ietf:params:oauth:grant-type:device_code", forms.last()["grant_type"])
+    }
+
+    @Test(expected = IOException::class)
+    fun failsOnAnAnswerItCannotRead() {
+        flow.account("someone else's")
     }
 
     @Test

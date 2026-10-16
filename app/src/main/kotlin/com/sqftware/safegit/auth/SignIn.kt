@@ -55,7 +55,10 @@ class SignIn(
     }
 
     /** Blocks on the first call, which reads the store. */
-    fun credentials(): Credentials = session()?.let { TokenCredentials(GITHUB, it.token) } ?: Credentials.NONE
+    fun credentials(): Credentials = token()?.let { TokenCredentials(GITHUB, it) } ?: Credentials.NONE
+
+    /** The signed-in account's token, for the host's API; blocks like [credentials]. */
+    fun token(): String? = session()?.token
 
     /** Who commits: the account by its private GitHub email, or the app on [device] before sign-in. */
     fun identity(device: String): Identity = session()?.account?.let {
