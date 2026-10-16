@@ -14,7 +14,6 @@ import com.sqftware.safegit.Services
 import com.sqftware.safegit.repos.RepoStore
 import com.sqftware.safegit.repos.SavedRepo
 import com.sqftware.safegit.sync.Choice
-import com.sqftware.safegit.sync.Credentials
 import com.sqftware.safegit.sync.Keep
 import com.sqftware.safegit.sync.Problem
 import com.sqftware.safegit.sync.SafeSync
@@ -92,7 +91,8 @@ class SyncWorker(context: Context, params: WorkerParameters) : CoroutineWorker(c
         // starts the same work again. The lock is held by the thread running git, so the rerun waits for it.
         synchronized(locks.computeIfAbsent(id) { Any() }) {
             val result = try {
-                SafeSync(services.git, services.identity, services.device).sync(services.repo(saved), Credentials.NONE, services.records.takeChoices(id))
+                SafeSync(services.git, services.signIn.identity(services.device), services.device)
+                    .sync(services.repo(saved), services.signIn.credentials(), services.records.takeChoices(id))
             } catch (e: Exception) {
                 // Shown like any other failure rather than leaving the last result up as if nothing had happened
                 SyncResult.Failed(Problem.GIT, e.toString())

@@ -1,5 +1,10 @@
 package com.sqftware.safegit
 
+import android.content.ActivityNotFoundException
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
@@ -21,11 +26,14 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
+import androidx.core.net.toUri
+import com.sqftware.safegit.auth.DeviceCode
 import com.sqftware.safegit.repos.Connector
 import com.sqftware.safegit.storage.AllFilesAccess
 import com.sqftware.safegit.storage.StorageAccess
 import com.sqftware.safegit.storage.folderOf
 import com.sqftware.safegit.ui.AccessScreen
+import com.sqftware.safegit.ui.AccountCard
 import com.sqftware.safegit.ui.AddRepoScreen
 import com.sqftware.safegit.ui.RepoRow
 import com.sqftware.safegit.ui.ReposScreen
@@ -82,11 +90,31 @@ private fun App(services: Services) {
 private fun Repos(services: Services, onAdd: () -> Unit) {
     val repos by services.repos.all.collectAsState(null)
     val states by services.syncer.states.collectAsState(emptyMap())
+    val account by services.signIn.state.collectAsState()
+    val context = LocalContext.current
     ReposScreen(
         rows = repos?.map { RepoRow(it, states[it.id]) } ?: return,
         onSync = services.syncer::sync,
         onAdd = onAdd,
+        header = {
+            AccountCard(
+                account,
+                onSignIn = services.signIn::signIn,
+                onOpen = { code -> openCode(context, code) },
+                onCancel = services.signIn::cancel,
+                onSignOut = services.signIn::signOut,
+            )
+        },
     )
+}
+
+/** Copies the code for pasting on GitHub's page, and opens it; the card shows the address for a phone with no browser. */
+private fun openCode(context: Context, code: DeviceCode) {
+    context.getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText(code.userCode, code.userCode))
+    try {
+        context.startActivity(Intent(Intent.ACTION_VIEW, code.verificationUri.toUri()))
+    } catch (_: ActivityNotFoundException) {
+    }
 }
 
 @Composable

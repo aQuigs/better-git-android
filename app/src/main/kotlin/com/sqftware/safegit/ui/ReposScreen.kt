@@ -35,18 +35,22 @@ import com.sqftware.safegit.work.SyncState
 /** A connected repo as the list shows it. */
 data class RepoRow(val repo: SavedRepo, val state: SyncState?)
 
+/** The connected repos, under [header], such as the account syncs run as. */
 @Composable
-fun ReposScreen(rows: List<RepoRow>, onSync: (SavedRepo, Map<Choice, Keep>) -> Unit, onAdd: () -> Unit) {
+fun ReposScreen(
+    rows: List<RepoRow>,
+    onSync: (SavedRepo, Map<Choice, Keep>) -> Unit,
+    onAdd: () -> Unit,
+    header: @Composable () -> Unit = {},
+) {
     Scaffold(
         floatingActionButton = { ExtendedFloatingActionButton(onClick = onAdd) { Text(stringResource(R.string.repos_add)) } },
     ) { padding ->
-        if (rows.isEmpty()) {
-            Column(Modifier.fillMaxSize().padding(padding).padding(24.dp), verticalArrangement = Arrangement.Center) {
-                Text(stringResource(R.string.repos_empty), style = MaterialTheme.typography.bodyLarge)
-            }
-            return@Scaffold
-        }
         LazyColumn(Modifier.fillMaxSize().padding(padding), contentPadding = PaddingValues(16.dp)) {
+            item { header() }
+            if (rows.isEmpty()) {
+                item { Text(stringResource(R.string.repos_empty), Modifier.padding(8.dp), style = MaterialTheme.typography.bodyLarge) }
+            }
             items(rows, key = { it.repo.id }) { row ->
                 RepoCard(row, onSync = { choices -> onSync(row.repo, choices) })
             }

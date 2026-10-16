@@ -1,6 +1,7 @@
 package com.sqftware.safegit.repos
 
 import com.sqftware.safegit.git.Git
+import com.sqftware.safegit.sync.Credentials
 import com.sqftware.safegit.sync.Identity
 import com.sqftware.safegit.sync.Problem
 import com.sqftware.safegit.sync.RepoSetup
@@ -20,6 +21,7 @@ import java.util.UUID
 class Connector(
     private val git: () -> Git,
     private val identity: Identity,
+    private val credentials: () -> Credentials,
     private val repos: RepoStore,
     private val syncer: Syncer,
     private val gitDir: (id: String) -> File,
@@ -67,7 +69,7 @@ class Connector(
 
         val id = UUID.randomUUID().toString()
         val result = try {
-            RepoSetup(git(), identity).connect(url, gitDir(id), folder)
+            RepoSetup(git(), identity).connect(url, gitDir(id), folder, credentials())
         } catch (e: Exception) {
             // Such as the folder gone since it was picked
             RepoSetup.Result.Failed(Problem.GIT, e.toString())

@@ -35,6 +35,17 @@
     <string name="problem_folder_repo">The folder has a git repo of its own that SafeGit can\'t start from.</string>
     <string name="problem_git">Git stopped unexpectedly.</string>
 
+    <string name="account_unavailable">This build can\'t sign in to GitHub, so it syncs public repos only.</string>
+    <string name="account_signed_out">Sign in to GitHub to sync private repos and push your changes.</string>
+    <string name="account_sign_in">Sign in with GitHub</string>
+    <string name="account_starting">Asking GitHub for a code…</string>
+    <string name="account_enter_code">Enter this code on GitHub to let SafeGit in:</string>
+    <string name="account_open">Copy code and open GitHub</string>
+    <string name="account_signed_in">Signed in to GitHub as %1$s</string>
+    <string name="account_sign_out">Sign out</string>
+    <string name="account_failed">Couldn\'t sign in: %1$s</string>
+    <string name="account_retry">Try again</string>
+
     <string name="add_title">Add a repo</string>
     <string name="add_url">Repo URL</string>
     <string name="add_url_hint">https://github.com/you/notes.git</string>

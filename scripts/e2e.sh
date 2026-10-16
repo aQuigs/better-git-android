@@ -2,12 +2,13 @@
 # Drives the debug build on the emulator through a whole sync story against a repo this Mac serves, playing the laptop
 # itself: connect an empty folder, sync, conflict on one line, resolve it by editing, then choose a version of a binary.
 # Wipes the app's data and /sdcard/Documents/Notes. Shots land in screenshots/e2e/.
-# Usage: ./gradlew assembleDebug && scripts/emulator-lock.sh scripts/e2e.sh
+# Usage: ./gradlew assembleDebug && scripts/emulator-lock.sh scripts/e2e.sh   (VARIANT=release after assembleRelease)
 
 set -u
 cd "$(dirname "$0")/.."
 
 PORT=8418
+VARIANT=${VARIANT:-debug}
 APP=com.sqftware.safegit
 FOLDER=/sdcard/Documents/Notes
 OUT=screenshots/e2e
@@ -52,7 +53,7 @@ trap 'kill $SERVER; rm -rf $WORK' EXIT
 adb reverse tcp:$PORT tcp:$PORT >/dev/null
 
 echo "== Fresh app, empty folder"
-adb install -r app/build/outputs/apk/debug/app-debug.apk >/dev/null || fail "install"
+adb install -r app/build/outputs/apk/$VARIANT/app-$VARIANT.apk >/dev/null || fail "install"
 adb shell appops set --uid $APP MANAGE_EXTERNAL_STORAGE default
 adb shell am force-stop $APP
 adb shell pm clear $APP >/dev/null
