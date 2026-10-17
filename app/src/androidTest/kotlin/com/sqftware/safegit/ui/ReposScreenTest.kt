@@ -3,6 +3,7 @@ package com.sqftware.safegit.ui
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.performClick
@@ -105,7 +106,8 @@ class ReposScreenTest {
     fun showsTheBranchARepoSyncs() {
         compose.setContent { ReposScreen(listOf(RepoRow(vault.copy(branch = "drafts"), null)), onSync = { _, _ -> }, onAdd = {}) }
 
-        compose.onNodeWithText("Branch: drafts").assertExists()
+        compose.onNodeWithContentDescription("Branch: drafts").assertExists()
+        compose.onNodeWithText("drafts", useUnmergedTree = true).assertExists()
     }
 
     @Test

@@ -23,6 +23,7 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -34,6 +35,8 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
@@ -94,9 +97,7 @@ fun ReposScreen(
 private fun RepoCard(row: RepoRow, onSync: (Map<Choice, Keep>) -> Unit, onSignIn: () -> Unit, onAuto: (AutoSync) -> Unit) {
     Card(Modifier.fillMaxWidth().padding(bottom = 12.dp)) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text(row.repo.name, style = MaterialTheme.typography.titleMedium)
-            Text(row.repo.url, style = MaterialTheme.typography.bodySmall)
-            if (row.repo.branch.isNotEmpty()) Text(stringResource(R.string.repo_branch, row.repo.branch), style = MaterialTheme.typography.bodySmall)
+            RepoTitle(row.repo)
             // Here rather than with the choices, so picks made outlast a sync that runs meanwhile, such as an automatic one
             val kept = remember(row.repo.id) { mutableStateMapOf<Choice, Keep>() }
 
@@ -119,6 +120,23 @@ private fun RepoCard(row: RepoRow, onSync: (Map<Choice, Keep>) -> Unit, onSignIn
                 AutoSyncPicker(row.repo.auto, onAuto)
             }
         }
+    }
+}
+
+/** The repo's name with its branch as a tag, over its URL. */
+@Composable
+private fun RepoTitle(repo: SavedRepo) {
+    Column {
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(repo.name, style = MaterialTheme.typography.titleMedium)
+            if (repo.branch.isNotEmpty()) {
+                val description = stringResource(R.string.repo_branch, repo.branch)
+                Surface(Modifier.semantics { contentDescription = description }, MaterialTheme.shapes.small, MaterialTheme.colorScheme.secondaryContainer) {
+                    Text(repo.branch, Modifier.padding(horizontal = 6.dp, vertical = 2.dp), style = MaterialTheme.typography.labelMedium)
+                }
+            }
+        }
+        Text(repo.url, style = MaterialTheme.typography.bodySmall)
     }
 }
 
