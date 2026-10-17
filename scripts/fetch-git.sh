@@ -80,10 +80,15 @@ PREFIX=$ROOT/data/data/com.termux/files/usr
 
 mkdir -p "$ASSETS/licenses"
 for PKG in $SEEN; do
-  if ! cat "$PREFIX/share/doc/$PKG"/copyright* > "$ASSETS/licenses/$PKG" 2> /dev/null; then
-    echo "Termux package $PKG ships no license file" >&2
-    exit 1
-  fi
+  # A package under several licenses ships one file each, which a rule keeps apart
+  for FILE in "$PREFIX/share/doc/$PKG"/copyright*; do
+    if [ ! -f "$FILE" ]; then
+      echo "Termux package $PKG ships no license file" >&2
+      exit 1
+    fi
+    [ -s "$ASSETS/licenses/$PKG" ] && printf '\n%s\n\n' "------------------------------------------------------------------------" >> "$ASSETS/licenses/$PKG"
+    cat "$FILE" >> "$ASSETS/licenses/$PKG"
+  done
 done
 
 cp "$PREFIX/bin/git" "$LIBS/libgit.so"

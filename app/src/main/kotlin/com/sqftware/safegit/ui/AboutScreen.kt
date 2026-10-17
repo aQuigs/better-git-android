@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.ListItem
@@ -38,17 +39,22 @@ import com.sqftware.safegit.about.Licenses
 fun AboutScreen(version: String, licenses: Licenses?, onOpen: (uri: String) -> Unit) {
     // The name of the package whose license is open, or APP_LIBRARIES
     var open by rememberSaveable { mutableStateOf<String?>(null) }
+    // Remembered while a license is open, so closing it returns to the same place in the list
+    val list = rememberLazyListState()
     val name = open
     if (licenses != null && name != null) {
         BackHandler { open = null }
-        val text = if (name == APP_LIBRARIES) licenses.apache else licenses.packages.firstOrNull { it.name == name }?.license
-        LicenseText(if (name == APP_LIBRARIES) stringResource(R.string.about_app_libraries) else name, text.orEmpty())
+        if (name == APP_LIBRARIES) {
+            LicenseText(stringResource(R.string.about_app_libraries), licenses.apache)
+        } else {
+            LicenseText(name, licenses.packages.firstOrNull { it.name == name }?.license.orEmpty())
+        }
         return
     }
 
     val subject = stringResource(R.string.about_offer_subject, version)
     Scaffold { padding ->
-        LazyColumn(Modifier.fillMaxSize().padding(padding), contentPadding = PaddingValues(24.dp)) {
+        LazyColumn(Modifier.fillMaxSize().padding(padding), list, contentPadding = PaddingValues(24.dp)) {
             item {
                 Column {
                     Text(stringResource(R.string.about_title), style = MaterialTheme.typography.headlineSmall)
