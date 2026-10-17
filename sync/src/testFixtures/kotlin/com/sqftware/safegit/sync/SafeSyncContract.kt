@@ -10,6 +10,7 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
 import java.io.File
+import kotlin.time.Duration.Companion.days
 
 /**
  * The rules SafeSync must keep, run against a real git: desktop git on the JVM, and the bundled git on the phone, so a
@@ -142,6 +143,36 @@ abstract class SafeSyncContract(tempParent: File? = null, workTreeParent: File? 
         val backups = phoneGit("for-each-ref", "--format=%(refname)", "refs/safegit/backup/").lines()
         assertEquals(listOf("refs/safegit/backup/1000"), backups)
         assertEquals("y", phoneGit("show", "refs/safegit/backup/1000:phone.md"))
+    }
+
+    @Test
+    fun aNewBackupPrunesOldOnesButKeepsTheNewestTen() {
+        val old = (1L..12L).map { it.toString() }
+        addBackups(old + "by-hand")
+
+        syncReplacingLocalCommits(now = 100 * DAY)
+
+        assertEquals(old.drop(3).toSet() + "${100 * DAY}" + "by-hand", backups())
+    }
+
+    @Test
+    fun keepsEveryBackupMadeWithinThirtyDaysOfTheNewest() {
+        val now = 100 * DAY
+        val recent = (1L..12L).map { "${now - it * DAY}" }
+        addBackups(recent + "${now - 31 * DAY}")
+
+        syncReplacingLocalCommits(now)
+
+        assertEquals(recent.toSet() + "$now", backups())
+    }
+
+    @Test
+    fun namesEachBackupLaterThanTheLastWhateverTheClock() {
+        addBackups(listOf("5000"))
+
+        syncReplacingLocalCommits(now = 1000)
+
+        assertEquals(setOf("5000", "5001"), backups())
     }
 
     @Test
@@ -1453,7 +1484,20 @@ abstract class SafeSyncContract(tempParent: File? = null, workTreeParent: File? 
         choices: Map<Choice, Keep> = emptyMap(),
         attended: Boolean = true,
         step: (Step) -> Unit = {},
-    ) = SafeSync(git, PHONE, device = "Pixel", now = { 1000 }).sync(repo, choices = choices, attended = attended, step = step)
+        now: Long = 1000,
+    ) = SafeSync(git, PHONE, device = "Pixel", now = { now }).sync(repo, choices = choices, attended = attended, step = step)
+
+    /** Syncs local work onto new remote work, so the sync replaces the local commit and backs it up. */
+    private fun syncReplacingLocalCommits(now: Long) {
+        laptop.write("laptop.md", "laptop work")
+        laptop.commitAndPush("laptop work")
+        files.write("phone.md", "phone work")
+        assertEquals(SyncResult.Synced(pulled = 1, pushed = 1), sync(now = now))
+    }
+
+    private fun addBackups(names: List<String>) = names.forEach { phoneGit("update-ref", "refs/safegit/backup/$it", "HEAD") }
+
+    private fun backups() = phoneGit("for-each-ref", "--format=%(refname:lstrip=3)", "refs/safegit/backup/").lines().toSet()
 
     /** Both sides change the second line of notes.md; returns the remote's commit, which has the laptop's change. */
     private fun conflictInNotes(): String {
@@ -1554,3 +1598,5 @@ abstract class SafeSyncContract(tempParent: File? = null, workTreeParent: File? 
         return git.ok(laptop, "hash-object", "-w", file.path).also { file.delete() }
     }
 }
+
+private val DAY = 1.days.inWholeMilliseconds
