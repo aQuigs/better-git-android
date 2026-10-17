@@ -23,7 +23,7 @@ class FileRepoStoreTest {
             save(notes.copy(url = "https://example.com/moved.git"))
         }
 
-        assertEquals(listOf(work, notes.copy(url = "https://example.com/moved.git")), FileRepoStore(file).all.first())
+        assertEquals(listOf(notes.copy(url = "https://example.com/moved.git"), work), FileRepoStore(file).all.first())
     }
 
     @Test

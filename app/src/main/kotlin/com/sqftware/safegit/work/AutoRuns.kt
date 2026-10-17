@@ -31,12 +31,12 @@ object AutoRuns {
     )
 
     /**
-     * How long to put off a run when the folder was last edited at [lastEdit], or null to run now. A time ahead of
-     * [now] is a clock's doing, not an edit being saved, and would otherwise put off every run until then.
+     * Whether a run puts itself off for [SNOOZE] when the folder was last edited at [lastEdit]. A time ahead of [now] is
+     * a clock's doing, not an edit being saved, and would otherwise put off every run until then.
      */
-    fun snooze(lastEdit: Long?, now: Long): Duration? {
-        val since = (now - (lastEdit ?: return null)).milliseconds
-        return if (since >= Duration.ZERO && since < QUIET) SNOOZE else null
+    fun putOff(lastEdit: Long?, now: Long): Boolean {
+        val since = (now - (lastEdit ?: return false)).milliseconds
+        return since >= Duration.ZERO && since < QUIET
     }
 
     /** How soon to try again after a run of [auto] that came to [result], or null to wait for the next period. */

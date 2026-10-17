@@ -4,7 +4,9 @@ import com.sqftware.safegit.repos.AutoSync
 import com.sqftware.safegit.sync.Problem
 import com.sqftware.safegit.sync.SyncResult
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import kotlin.time.Duration.Companion.hours
 import kotlin.time.Duration.Companion.minutes
@@ -15,15 +17,15 @@ class AutoRunsTest {
 
     @Test
     fun putsOffARunWhileTheFolderWasEditedInTheLastMinute() {
-        assertEquals(5.minutes, AutoRuns.snooze(now - 30.seconds.inWholeMilliseconds, now))
-        assertEquals(5.minutes, AutoRuns.snooze(now, now))
-        assertNull(AutoRuns.snooze(now - 1.minutes.inWholeMilliseconds, now))
-        assertNull(AutoRuns.snooze(null, now))
+        assertTrue(AutoRuns.putOff(now - 30.seconds.inWholeMilliseconds, now))
+        assertTrue(AutoRuns.putOff(now, now))
+        assertFalse(AutoRuns.putOff(now - 1.minutes.inWholeMilliseconds, now))
+        assertFalse(AutoRuns.putOff(null, now))
     }
 
     @Test
     fun runsDespiteAnEditTimeAheadOfTheClock() {
-        assertNull(AutoRuns.snooze(now + 1.hours.inWholeMilliseconds, now))
+        assertFalse(AutoRuns.putOff(now + 1.hours.inWholeMilliseconds, now))
     }
 
     @Test

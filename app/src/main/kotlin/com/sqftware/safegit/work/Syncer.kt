@@ -29,6 +29,7 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.time.Duration
@@ -64,10 +65,10 @@ class WorkSyncer(
     private val repos: RepoStore,
     private val records: SyncRecords,
     steps: SyncSteps,
+    private val schedule: AutoSchedule,
     private val scope: CoroutineScope,
 ) : Syncer {
     private val work = WorkManager.getInstance(context)
-    private val schedule = AutoSchedule(work)
 
     // WorkManager only says what is running: it prunes finished work after a day, and the records keep every result
     override val states: Flow<Map<String, SyncState>> = combine(repos.all, work.getWorkInfosByTagFlow(TAG), steps.running) { saved, infos, running ->
@@ -116,53 +117,57 @@ class SyncWorker(context: Context, params: WorkerParameters) : CoroutineWorker(c
     override suspend fun doWork(): Result = withContext(Dispatchers.IO) {
         val services = Services.of(applicationContext)
         val id = inputData.getString(REPO) ?: return@withContext Result.failure()
-        val saved = services.repos.all.first().find { it.id == id } ?: return@withContext Result.failure()
-        val automatic = inputData.getBoolean(AUTOMATIC, false)
-        val schedule = AutoSchedule(WorkManager.getInstance(applicationContext))
-        val again = { delay: Duration -> schedule.again(id, delay, fromAgain = inputData.getBoolean(AGAIN, false)) }
+        val run = Run.entries.find { it.name == inputData.getString(RUN) } ?: Run.USER
+        val automatic = run != Run.USER
+        val again = { delay: Duration -> services.schedule.again(id, delay, from = run) }
 
         // Unique work is not enough: a stopped worker's sync runs on, since git cannot be cancelled, while WorkManager
         // starts the same work again. The lock is held by the thread running git, so the rerun waits for it.
         synchronized(locks.computeIfAbsent(id) { Any() }) {
-            // Work scheduled before the setting went off, and not yet cancelled
+            // The wait can be long, and the work cancelled or the setting turned off meanwhile
+            if (isStopped) return@withContext Result.success()
+            val saved = runBlocking { services.repos.all.first() }.find { it.id == id } ?: return@withContext Result.failure()
             if (automatic && saved.auto == AutoSync.OFF) return@withContext Result.success()
-            val repo = services.repo(saved)
 
-            services.steps.start(id)
-            try {
-                val result = try {
-                    if (automatic) {
-                        AutoRuns.snooze(RecentEdits(services.git).latest(repo), System.currentTimeMillis())?.let {
-                            again(it)
-                            return@withContext Result.success()
-                        }
-                    }
-                    // The user's choices wait for the sync they start; an automatic one leaves conflicts to it too
-                    val choices = if (automatic) emptyMap() else services.records.takeChoices(id)
-                    SafeSync(services.git, services.signIn.identity(services.device), services.device)
-                        .sync(repo, services.signIn.credentials(), choices, markConflicts = !automatic) { services.steps.step(id, it) }
-                } catch (e: Exception) {
-                    // Shown like any other failure rather than leaving the last result up as if nothing had happened
-                    SyncResult.Failed(Problem.GIT, e.toString())
-                }
-                services.records.saveResult(id, result)
-                services.notices.after(saved, result, automatic)
-                if (automatic) AutoRuns.retry(saved.auto, result)?.let(again)
-            } finally {
-                services.steps.end(id)
+            val result = sync(services, saved, automatic)
+            if (result == null) {
+                again(AutoRuns.SNOOZE)
+                return@withContext Result.success()
             }
+            if (automatic) AutoRuns.retry(saved.auto, result)?.let(again)
+            services.notices.after(saved, result, automatic)
         }
         Result.success()
+    }
+
+    /** Syncs [saved] and saves the result, or returns null when an automatic sync is put off by an edit. */
+    private fun sync(services: Services, saved: SavedRepo, automatic: Boolean): SyncResult? {
+        val repo = services.repo(saved)
+        services.steps.start(saved.id)
+        try {
+            val result = try {
+                if (automatic && AutoRuns.putOff(RecentEdits(services.git).latest(repo), System.currentTimeMillis())) return null
+                // The user's choices wait for the sync they start; an automatic one leaves conflicts to it too
+                val choices = if (automatic) emptyMap() else services.records.takeChoices(saved.id)
+                SafeSync(services.git, services.signIn.identity(services.device), services.device)
+                    .sync(repo, services.signIn.credentials(), choices, attended = !automatic) { services.steps.step(saved.id, it) }
+            } catch (e: Exception) {
+                // Shown like any other failure rather than leaving the last result up as if nothing had happened
+                SyncResult.Failed(Problem.GIT, e.toString())
+            }
+            // Before the sync stops showing as running, so the state shown next is this result
+            services.records.saveResult(saved.id, result)
+            return result
+        } finally {
+            services.steps.end(saved.id)
+        }
     }
 
     companion object {
         const val REPO = "repo"
 
-        /** Started by a schedule, not the user. */
-        const val AUTOMATIC = "automatic"
-
-        /** An automatic sync run before its period is up. */
-        const val AGAIN = "again"
+        /** A [Run] by name; a run without one is the user's. */
+        const val RUN = "run"
         private val locks = ConcurrentHashMap<String, Any>()
     }
 }

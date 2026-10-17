@@ -19,9 +19,11 @@ internal class HeldConflict(private val git: RepoGit, private val markers: Marke
 
     /**
      * The marked files that still have markers while the branch is held; null when it is not, or no longer: then the
-     * held commit has left the branch, with the folder and index as they were.
+     * held commit has left the branch, with the folder and index as they were. Without [finish], a branch with no markers
+     * left stays held, and every marked file counts: only a sync the user starts takes an edit as the resolution, since
+     * one that came on its own could meet a file the user is halfway through resolving.
      */
-    fun left(): List<String>? {
+    fun left(finish: Boolean = true): List<String>? {
         val held = git.resolve(REF) ?: return null
         if (held != git.head()) {
             // The update to it was undone
@@ -31,8 +33,10 @@ internal class HeldConflict(private val git: RepoGit, private val markers: Marke
 
         // Headers, a blank line, then the message: the subject, a blank line and one marked path per line
         val (headers, message) = git.check("cat-file", "commit", held).stdout.split("\n\n", limit = 2)
-        val left = message.substringAfter("\n\n").split("\n").filter { it.isNotEmpty() && hasMarkers(git.repo.workTree.resolve(it)) }
+        val marked = message.substringAfter("\n\n").split("\n").filter(String::isNotEmpty)
+        val left = marked.filter { hasMarkers(git.repo.workTree.resolve(it)) }
         if (left.isNotEmpty()) return left
+        if (!finish) return marked
 
         val parent = headers.lines().first { it.startsWith("parent ") }.removePrefix("parent ")
         git.check("update-ref", "--stdin", input = "update HEAD $parent $held\ndelete $REF $held\n")

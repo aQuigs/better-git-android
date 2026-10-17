@@ -77,6 +77,8 @@ private fun RepoCard(row: RepoRow, onSync: (Map<Choice, Keep>) -> Unit, onSignIn
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text(row.repo.name, style = MaterialTheme.typography.titleMedium)
             Text(row.repo.url, style = MaterialTheme.typography.bodySmall)
+            // Here rather than with the choices, so picks made outlast a sync that runs meanwhile, such as an automatic one
+            val kept = remember(row.repo.id) { mutableStateMapOf<Choice, Keep>() }
 
             when (val state = row.state) {
                 null -> Text(stringResource(R.string.state_never))
@@ -84,7 +86,7 @@ private fun RepoCard(row: RepoRow, onSync: (Map<Choice, Keep>) -> Unit, onSignIn
                     Text(stringResource(if (state is SyncState.Running) stepText(state.step) else R.string.state_waiting))
                     LinearProgressIndicator(Modifier.fillMaxWidth())
                 }
-                is SyncState.Finished -> Outcome(state.result, onSync, row.canSignIn, onSignIn)
+                is SyncState.Finished -> Outcome(state.result, kept, onSync, row.canSignIn, onSignIn)
             }
 
             // A choice syncs with its own button
@@ -128,13 +130,13 @@ private fun autoText(auto: AutoSync) = when (auto) {
 }
 
 @Composable
-private fun Outcome(result: SyncResult, onSync: (Map<Choice, Keep>) -> Unit, canSignIn: Boolean, onSignIn: () -> Unit) {
+private fun Outcome(result: SyncResult, kept: MutableMap<Choice, Keep>, onSync: (Map<Choice, Keep>) -> Unit, canSignIn: Boolean, onSignIn: () -> Unit) {
     when (result) {
         SyncResult.UpToDate -> Text(stringResource(R.string.state_up_to_date))
         is SyncResult.Synced -> Text(stringResource(R.string.state_synced))
         is SyncResult.Conflict -> Paths(stringResource(R.string.state_conflict), result.paths)
         is SyncResult.ConflictAhead -> Paths(stringResource(R.string.state_conflict_ahead), result.paths)
-        is SyncResult.Choose -> Choices(result.choices, onSync)
+        is SyncResult.Choose -> Choices(result.choices, kept, onSync)
         is SyncResult.Failed -> {
             Failure(result.problem, result.detail)
             if (result.problem == Problem.SIGN_IN && canSignIn) OutlinedButton(onClick = onSignIn) { Text(stringResource(R.string.sign_in_again)) }
@@ -152,8 +154,7 @@ private fun Paths(explanation: String, paths: List<String>) {
 
 /** Asks for a [Keep] for each choice, and syncs with them once every one has one. */
 @Composable
-private fun Choices(choices: List<Choice>, onSync: (Map<Choice, Keep>) -> Unit) {
-    val kept = remember(choices) { mutableStateMapOf<Choice, Keep>() }
+private fun Choices(choices: List<Choice>, kept: MutableMap<Choice, Keep>, onSync: (Map<Choice, Keep>) -> Unit) {
     Text(stringResource(R.string.state_choose))
     for (choice in choices) {
         Column {
@@ -165,7 +166,8 @@ private fun Choices(choices: List<Choice>, onSync: (Map<Choice, Keep>) -> Unit) 
             }
         }
     }
-    Button(onClick = { onSync(kept.toMap()) }, enabled = kept.size == choices.size) { Text(stringResource(R.string.sync_with_choices)) }
+    // Picks for choices an earlier sync asked are left out, as each counts only against what it was made for
+    Button(onClick = { onSync(kept.filterKeys { it in choices }) }, enabled = choices.all { it in kept }) { Text(stringResource(R.string.sync_with_choices)) }
 }
 
 @Composable

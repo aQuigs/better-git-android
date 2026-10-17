@@ -34,7 +34,8 @@ class FileRepoStore(private val file: File) : RepoStore {
 
     @Synchronized
     override fun save(repo: SavedRepo) {
-        val next = repos.value.filter { it.id != repo.id } + repo
+        // A repo saved again keeps its place, so its card stays put when a setting changes
+        val next = if (repos.value.any { it.id == repo.id }) repos.value.map { if (it.id == repo.id) repo else it } else repos.value + repo
         file.writeAtomically(
             JSONArray(next.map { JSONObject().put("id", it.id).put("url", it.url).put("folder", it.folder.path).put("auto", it.auto.name) }).toString(),
         )

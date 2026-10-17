@@ -15,6 +15,9 @@ import com.sqftware.safegit.sync.Problem
 import com.sqftware.safegit.sync.Step
 import com.sqftware.safegit.sync.SyncResult
 import com.sqftware.safegit.work.SyncState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
@@ -134,6 +137,25 @@ class ReposScreenTest {
         compose.onNodeWithText("This phone has it, the remote deleted it").assertExists()
         compose.onAllNodesWithText("Keep this phone's")[0].performClick()
         compose.onNodeWithText("Sync with these choices").assertIsNotEnabled()
+        compose.onAllNodesWithText("Keep the remote's")[1].performClick()
+        compose.onNodeWithText("Sync with these choices").performClick()
+
+        assertEquals(listOf(mapOf(photo to Keep.LOCAL, deleted to Keep.REMOTE)), synced)
+    }
+
+    @Test
+    fun keepsPicksMadeBeforeASyncThatAsksTheSame() {
+        val photo = Choice("photo.png", local = "a1", remote = "b2")
+        val deleted = Choice("old.md", local = "c3", remote = null)
+        val asked = SyncState.Finished(SyncResult.Choose(listOf(photo, deleted)))
+        var state by mutableStateOf<SyncState>(asked)
+        val synced = mutableListOf<Map<Choice, Keep>>()
+        compose.setContent { ReposScreen(listOf(RepoRow(vault, state)), onSync = { _, choices -> synced += choices }, onAdd = {}) }
+
+        compose.onAllNodesWithText("Keep this phone's")[0].performClick()
+        state = SyncState.Running(Step.FETCH)
+        compose.waitForIdle()
+        state = asked
         compose.onAllNodesWithText("Keep the remote's")[1].performClick()
         compose.onNodeWithText("Sync with these choices").performClick()
 

@@ -46,6 +46,14 @@ class SyncNoticesTest {
     }
 
     @Test
+    fun showsItAgainForOtherFiles() {
+        after(conflict)
+        after(SyncResult.ConflictAhead(listOf("ideas.md")))
+
+        assertEquals(listOf("show CONFLICT_AHEAD", "show CONFLICT_AHEAD"), board.events)
+    }
+
+    @Test
     fun clearsItOnceASyncGetsThrough() {
         after(conflict)
         after(SyncResult.Synced(1, 1))
