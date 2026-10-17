@@ -103,7 +103,7 @@ internal fun GitResult.remoteProblem(otherwise: Problem) =
  * combined with the remote's in one three-way merge that touches neither the folder nor the branch. Only then does the
  * folder move, through [FolderUpdate], which writes only over files git has saved. A conflict either puts both versions
  * of a file in it between markers, as a rebase would, or changes nothing and asks which version to keep. The commits a
- * sync replaces stay reachable under refs/safegit/backup/.
+ * sync replaces stay reachable as [Backups] for a while.
  *
  * Callers run one sync per repo at a time, and nothing else may run git in its git dir.
  */
@@ -164,6 +164,7 @@ class SafeSync(
         private val folder = FolderUpdate(git)
         private val markers = Markers(device)
         private val held = HeldConflict(git, markers)
+        private val backups = Backups(git)
         val submodules = SubmoduleSync(git, credentials, choices, step, now) { repo, choices ->
             nested(repo, credentials, choices, step, attended, fetched = true)
         }
@@ -217,7 +218,7 @@ class SafeSync(
                             else return SyncResult.ConflictAhead(combined.paths)
                     }
                     if (base != null) {
-                        git.check("update-ref", "refs/safegit/backup/${now()}", head!!)
+                        backups.record(head!!, now())
                     }
 
                     submodules.beforeMove(head, target)?.let { return it }
