@@ -12,8 +12,8 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 
-/** A folder connected to a remote, by the id that names its git dir. */
-data class SavedRepo(val id: String, val url: String, val folder: File, val auto: AutoSync = AutoSync.OFF) {
+/** A folder connected to [branch] of a remote, by the id that names its git dir. */
+data class SavedRepo(val id: String, val url: String, val folder: File, val branch: String, val auto: AutoSync = AutoSync.OFF) {
     val name: String get() = folder.name
 }
 
@@ -26,8 +26,8 @@ interface RepoStore {
     fun save(repo: SavedRepo)
 }
 
-/** Keeps the repos as JSON in one small file, rewritten whole. */
-class FileRepoStore(private val file: File) : RepoStore {
+/** Keeps the repos as JSON in one small file, rewritten whole; [branchOf] a repo saved before its branch was is read from its git dir. */
+class FileRepoStore(private val file: File, private val branchOf: (id: String) -> String) : RepoStore {
     private val repos by lazy { MutableStateFlow(read()) }
 
     override val all: Flow<List<SavedRepo>> = flow { emitAll(repos) }.flowOn(Dispatchers.IO)
@@ -37,7 +37,7 @@ class FileRepoStore(private val file: File) : RepoStore {
         // A repo saved again keeps its place, so its card stays put when a setting changes
         val next = if (repos.value.any { it.id == repo.id }) repos.value.map { if (it.id == repo.id) repo else it } else repos.value + repo
         file.writeAtomically(
-            JSONArray(next.map { JSONObject().put("id", it.id).put("url", it.url).put("folder", it.folder.path).put("auto", it.auto.name) }).toString(),
+            JSONArray(next.map { JSONObject().put("id", it.id).put("url", it.url).put("folder", it.folder.path).put("branch", it.branch).put("auto", it.auto.name) }).toString(),
         )
         repos.value = next
     }
@@ -47,7 +47,8 @@ class FileRepoStore(private val file: File) : RepoStore {
         return JSONArray(file.readText()).objects().map {
             // Repos saved before automatic syncs, or with a setting this version lacks, sync only when asked
             val auto = AutoSync.entries.find { auto -> auto.name == it.optString("auto") } ?: AutoSync.OFF
-            SavedRepo(it.getString("id"), it.getString("url"), File(it.getString("folder")), auto)
+            val id = it.getString("id")
+            SavedRepo(id, it.getString("url"), File(it.getString("folder")), it.optString("branch").ifEmpty { branchOf(id) }, auto)
         }
     }
 }

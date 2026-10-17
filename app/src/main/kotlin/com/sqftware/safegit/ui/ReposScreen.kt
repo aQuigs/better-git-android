@@ -96,6 +96,7 @@ private fun RepoCard(row: RepoRow, onSync: (Map<Choice, Keep>) -> Unit, onSignIn
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text(row.repo.name, style = MaterialTheme.typography.titleMedium)
             Text(row.repo.url, style = MaterialTheme.typography.bodySmall)
+            if (row.repo.branch.isNotEmpty()) Text(stringResource(R.string.repo_branch, row.repo.branch), style = MaterialTheme.typography.bodySmall)
             // Here rather than with the choices, so picks made outlast a sync that runs meanwhile, such as an automatic one
             val kept = remember(row.repo.id) { mutableStateMapOf<Choice, Keep>() }
 

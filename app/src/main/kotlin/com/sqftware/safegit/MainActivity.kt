@@ -27,6 +27,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
@@ -35,6 +36,7 @@ import com.sqftware.safegit.about.Licenses
 import com.sqftware.safegit.auth.DeviceCode
 import com.sqftware.safegit.repos.AutoSync
 import com.sqftware.safegit.repos.Connector
+import com.sqftware.safegit.repos.RemoteBranches
 import com.sqftware.safegit.storage.AllFilesAccess
 import com.sqftware.safegit.storage.StorageAccess
 import com.sqftware.safegit.storage.folderOf
@@ -172,6 +174,8 @@ private fun open(context: Context, uri: String) {
 private fun AddRepo(services: Services, state: Connector.State, onDone: () -> Unit) {
     val connector = services.connector
     val choices by services.accountRepos.state.collectAsState()
+    var url by rememberSaveable { mutableStateOf("") }
+    val branches by remember(url) { services.branches.of(url) }.collectAsState(RemoteBranches.State.Loading(url))
     var folder by rememberSaveable { mutableStateOf<String?>(null) }
     var unusable by rememberSaveable { mutableStateOf(false) }
     val pick = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { tree ->
@@ -192,9 +196,11 @@ private fun AddRepo(services: Services, state: Connector.State, onDone: () -> Un
         folderUnusable = unusable,
         state = state,
         onPickFolder = { pick.launch(null) },
-        onConnect = { url -> folder?.let { connector.connect(url, File(it)) } },
+        onConnect = { url, branch -> folder?.let { connector.connect(url, File(it), branch) } },
         onCancel = cancel,
         choices = choices,
+        branches = branches,
+        onUrlChange = { url = it },
     )
 }
 

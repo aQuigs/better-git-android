@@ -50,7 +50,7 @@ mkdir -p $WORK/laptop/daily
 printf '# Welcome\n\nThese notes sync with SafeGit.\n\nToday: nothing yet.\n' > $WORK/laptop/welcome.md
 printf -- '- wrote the e2e\n' > $WORK/laptop/daily/2026-10-13.md
 printf '\211PNG\000first' > $WORK/laptop/photo.png
-laptop add --all && laptop commit -qm "First notes" && laptop push -q origin main
+laptop add --all && laptop commit -qm "First notes" && laptop push -q origin main main:drafts
 scripts/git-http-server.py $WORK $PORT &
 SERVER=$!
 trap 'kill $SERVER; rm -rf $WORK' EXIT
@@ -80,6 +80,12 @@ tap "Add a repo"
 await "Repo URL" 10
 tap "Repo URL"
 adb shell input text "http://127.0.0.1:$PORT/remote.git"
+await "main (default)" 20
+tap "main (default)"
+await "drafts" 5
+shot branches
+# Back closes the menu, leaving the default picked; with the keyboard up, the shot's back may have closed it already
+shown "drafts" && adb shell input keyevent 4 && sleep 1
 tap "Choose folder"
 await "Documents" 10
 tap "Documents"
@@ -93,6 +99,7 @@ await "Connect" 10
 shot add
 tap "Connect"
 await "Synced"
+await "Branch: main" 5
 shot synced
 [ "$(adb shell cat $FOLDER/welcome.md)" == "$(cat $WORK/laptop/welcome.md)" ] || fail "welcome.md did not arrive"
 

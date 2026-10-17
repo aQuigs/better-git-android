@@ -15,7 +15,7 @@ class SyncNoticesTest {
     @get:Rule
     val temp = TemporaryFolder()
 
-    private val vault = SavedRepo("1", "https://github.com/me/notes.git", File("/storage/emulated/0/Documents/notes"))
+    private val vault = SavedRepo("1", "https://github.com/me/notes.git", File("/storage/emulated/0/Documents/notes"), "main")
     private val board = object : NoticeBoard {
         val events = mutableListOf<String>()
 
