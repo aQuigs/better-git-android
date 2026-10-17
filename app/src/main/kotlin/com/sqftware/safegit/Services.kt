@@ -15,6 +15,8 @@ import com.sqftware.safegit.repos.RepoStore
 import com.sqftware.safegit.repos.SavedRepo
 import com.sqftware.safegit.sync.Identity
 import com.sqftware.safegit.sync.Repo
+import com.sqftware.safegit.work.NotificationBoard
+import com.sqftware.safegit.work.SyncNotices
 import com.sqftware.safegit.work.SyncRecords
 import com.sqftware.safegit.work.SyncSteps
 import com.sqftware.safegit.work.Syncer
@@ -47,6 +49,7 @@ class Services private constructor(context: Context) {
     )
     val accountRepos = AccountRepos(GitHubRepoDirectory(signIn::token), signIn.state.map { it is SignIn.State.SignedIn }, scope)
     val steps = SyncSteps()
+    val notices = SyncNotices(context.filesDir.resolve("syncs"), NotificationBoard(context))
     val syncer: Syncer = WorkSyncer(context, repos, records, steps, scope)
 
     // Connecting commits nothing, so who it runs as never shows

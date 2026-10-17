@@ -1,6 +1,7 @@
 #!/bin/bash
 # Drives the debug build on the emulator through a whole sync story against a repo this Mac serves, playing the laptop
 # itself: connect an empty folder, sync, conflict on one line, resolve it by editing, then choose a version of a binary.
+# Then automatic syncs: one pulls, one waits while a file is being saved, and one leaves a conflict for the user.
 # Wipes the app's data and /sdcard/Documents/Notes. Shots land in screenshots/e2e/.
 # Usage: ./gradlew assembleDebug && scripts/emulator-lock.sh scripts/e2e.sh   (VARIANT=release after assembleRelease)
 
@@ -123,5 +124,68 @@ sleep 2
 await "Synced"
 laptop pull -q
 grep -q phone $WORK/laptop/photo.png || fail "the phone's photo did not reach the laptop"
+
+# Turning automatic syncs on runs the first right away, which is what starts each run here
+auto_on() {
+  tap "Auto sync: Off"
+  tap "Every 15 minutes"
+  await "Auto sync: Every 15 minutes" 10
+}
+auto_off() {
+  tap "Auto sync: Every 15 minutes"
+  tap "Off"
+  await "Auto sync: Off" 10
+}
+on_phone() { local end=$((SECONDS + 60)); until adb shell "[ -e $FOLDER/$1 ]"; do [ $SECONDS -lt $end ] || fail "$1 never reached the phone"; sleep 1; done; }
+pushed() { local end=$((SECONDS + 60)); until laptop pull -q 2>/dev/null && [ -e $WORK/laptop/$1 ]; do [ $SECONDS -lt $end ] || fail "$1 never reached the laptop"; sleep 2; done; }
+worker_done() { local end=$((SECONDS + 60)); until adb logcat -d | grep -q "Worker result SUCCESS"; do [ $SECONDS -lt $end ] || fail "no sync worker finished"; sleep 1; done; adb logcat -c; }
+notice() { adb shell dumpsys notification --noredact | grep -q "$1"; }
+backdate() { adb shell touch -m -d 2020-01-01T00:00:00 $FOLDER/$1; }
+# WorkManager runs a job forced before a periodic run is due only once its time comes, so this starts the one-off ones
+run_jobs() { for id in $(adb shell dumpsys jobscheduler | grep -oE "JOB #u[0-9a-z]+/[0-9]+: [0-9a-f]+ $APP/" | sed -E 's|.*/([0-9]+):.*|\1|' | sort -u); do adb shell cmd jobscheduler run -f $APP $id >/dev/null; done; }
+
+echo "== Automatic syncs"
+adb shell pm grant $APP android.permission.POST_NOTIFICATIONS
+printf 'from the laptop\n' > $WORK/laptop/later.md
+laptop add later.md && laptop commit -qm "Later" && laptop push -q
+auto_on
+on_phone later.md
+await "Synced"
+shot auto
+
+echo "== An automatic sync waits while a file is being saved"
+auto_off
+adb logcat -c
+phone_writes draft.md 'half written\n'
+printf 'more from the laptop\n' > $WORK/laptop/more.md
+laptop add more.md && laptop commit -qm "More" && laptop push -q
+auto_on
+worker_done
+adb shell "[ -e $FOLDER/more.md ]" && fail "synced while a file was being saved"
+backdate draft.md
+run_jobs
+on_phone more.md
+pushed draft.md
+
+echo "== An automatic sync leaves a conflict for the user"
+auto_off
+phone_writes welcome.md '# Welcome\n\nThese notes sync with SafeGit.\n\nToday: phone again.\n'
+backdate welcome.md
+laptop pull -q
+printf '# Welcome\n\nThese notes sync with SafeGit.\n\nToday: laptop again.\n' > $WORK/laptop/welcome.md
+laptop commit -qam "Laptop again" && laptop push -q
+auto_on
+end=$((SECONDS + 60)); until notice "changed the same lines"; do [ $SECONDS -lt $end ] || fail "no notification of the conflict"; sleep 1; done
+adb shell "grep -q '^<<<<<<<' $FOLDER/welcome.md" && fail "an automatic sync wrote markers"
+await "welcome.md"
+shot conflict-ahead
+adb shell cmd statusbar expand-notifications
+sleep 2
+shot notification
+adb shell cmd statusbar collapse
+sleep 1
+tap "Sync"
+end=$((SECONDS + 60)); until adb shell "grep -q '^<<<<<<<' $FOLDER/welcome.md"; do [ $SECONDS -lt $end ] || fail "Sync wrote no markers"; sleep 1; done
+notice "changed the same lines" && fail "the notification outlived the sync that showed the conflict"
 
 echo "E2E passed; shots in $OUT"

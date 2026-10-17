@@ -7,6 +7,7 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.performClick
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import com.sqftware.safegit.repos.AutoSync
 import com.sqftware.safegit.repos.SavedRepo
 import com.sqftware.safegit.sync.Choice
 import com.sqftware.safegit.sync.Keep
@@ -63,6 +64,34 @@ class ReposScreenTest {
         compose.onNodeWithText("daily/today.md").assertExists()
         compose.onNodeWithText("ideas.md").assertExists()
         compose.onNodeWithText("Sync").assertIsEnabled()
+    }
+
+    @Test
+    fun listsTheFilesAnAutomaticSyncLeftForTheUser() {
+        val ahead = SyncState.Finished(SyncResult.ConflictAhead(listOf("ideas.md")))
+        compose.setContent { ReposScreen(listOf(RepoRow(vault, ahead)), onSync = { _, _ -> }, onAdd = {}) }
+
+        compose.onNodeWithText("An automatic sync leaves them as they are", substring = true).assertExists()
+        compose.onNodeWithText("ideas.md").assertExists()
+        compose.onNodeWithText("Sync").assertIsEnabled()
+    }
+
+    @Test
+    fun setsHowOftenARepoSyncsOnItsOwn() {
+        val picked = mutableListOf<Pair<SavedRepo, AutoSync>>()
+        compose.setContent { ReposScreen(listOf(RepoRow(vault, null)), onSync = { _, _ -> }, onAdd = {}, onAuto = { repo, auto -> picked += repo to auto }) }
+
+        compose.onNodeWithText("Auto sync: Off").performClick()
+        compose.onNodeWithText("Every 6 hours").performClick()
+
+        assertEquals(listOf(vault to AutoSync.EVERY_6_HOURS), picked)
+    }
+
+    @Test
+    fun showsTheRepoAutoSyncSetting() {
+        compose.setContent { ReposScreen(listOf(RepoRow(vault.copy(auto = AutoSync.WEEKLY), null)), onSync = { _, _ -> }, onAdd = {}) }
+
+        compose.onNodeWithText("Auto sync: Every week").assertExists()
     }
 
     @Test

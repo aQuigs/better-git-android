@@ -317,6 +317,7 @@ internal class SubmoduleSync(
     /** A submodule's result as its parent reports it, its paths named from the parent's folder. */
     private fun SyncResult.within(path: String) = when (this) {
         is SyncResult.Conflict -> SyncResult.Conflict(paths.map { "$path/$it" })
+        is SyncResult.ConflictAhead -> SyncResult.ConflictAhead(paths.map { "$path/$it" })
         is SyncResult.Choose -> SyncResult.Choose(choices.map { it.copy(path = "$path/${it.path}") })
         else -> this
     }

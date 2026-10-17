@@ -36,6 +36,8 @@ class ConnectorTest {
         override fun sync(repo: SavedRepo, choices: Map<Choice, Keep>) {
             synced += repo
         }
+
+        override fun setAuto(repo: SavedRepo, auto: AutoSync) = Unit
     }
     private lateinit var remote: File
     private lateinit var folder: File

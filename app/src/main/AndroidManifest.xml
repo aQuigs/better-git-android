@@ -3,6 +3,8 @@
     xmlns:tools="http://schemas.android.com/tools">
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Says when an automatic sync needs the user, such as for a conflict -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <!-- Git needs real paths, file locks and lstat in the synced folders, which the Storage Access Framework cannot give -->
     <uses-permission
         android:name="android.permission.MANAGE_EXTERNAL_STORAGE"

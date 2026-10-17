@@ -22,6 +22,7 @@ class SyncRecordsTest {
             SyncResult.UpToDate,
             SyncResult.Synced(2, 1),
             SyncResult.Conflict(listOf("a.md", "b c.md")),
+            SyncResult.ConflictAhead(listOf("a.md")),
             SyncResult.Choose(listOf(Choice("photo.png", "a1", null))),
             SyncResult.Failed(Problem.FETCH, "no network"),
         )
