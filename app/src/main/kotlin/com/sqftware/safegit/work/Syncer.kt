@@ -24,13 +24,16 @@ import com.sqftware.safegit.sync.SyncResult
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
+import java.util.UUID
 import kotlin.time.Duration
 
 /** Where a repo's sync stands: waiting to start, running, or the last one's result. */
@@ -44,12 +47,23 @@ sealed interface SyncState {
     data class Finished(val result: SyncResult) : SyncState
 }
 
+/** A sync of every repo at once: the repos it queued, in order, and each one's result once it has one. */
+data class AllRun(val ids: List<String>, val results: Map<String, SyncResult> = emptyMap(), val going: Boolean = false)
+
 /** Starts syncs and reports how they stand. */
 interface Syncer {
     /** Each repo's sync state by id; a repo never synced has none. */
     val states: Flow<Map<String, SyncState>>
 
     fun sync(repo: SavedRepo, choices: Map<Choice, Keep> = emptyMap())
+
+    /** The last [syncAll], until [closeAll]; null when there is none. */
+    val all: Flow<AllRun?>
+
+    /** Syncs every repo one after another, each as [sync] would with no new choices. */
+    fun syncAll()
+
+    fun closeAll()
 
     /** Saves how often [repo] syncs on its own, and schedules it so. */
     fun setAuto(repo: SavedRepo, auto: AutoSync)
@@ -68,6 +82,7 @@ class WorkSyncer(
     private val scope: CoroutineScope,
 ) : Syncer {
     private val work = WorkManager.getInstance(context)
+    private val allClosed = MutableStateFlow(0)
 
     // WorkManager only says what is running: it prunes finished work after a day, and the records keep every result
     override val states: Flow<Map<String, SyncState>> = combine(repos.all, work.getWorkInfosByTagFlow(TAG), steps.running) { saved, infos, running ->
@@ -82,19 +97,45 @@ class WorkSyncer(
         }.toMap()
     }.distinctUntilChanged().flowOn(Dispatchers.IO)
 
+    // Each link of the chain records its result before it finishes, so a change of the chain's work brings the results
+    override val all: Flow<AllRun?> = combine(allClosed, work.getWorkInfosForUniqueWorkFlow(ALL_WORK)) { _, infos ->
+        records.all()?.copy(going = infos.any { !it.state.isFinished })
+    }.distinctUntilChanged().flowOn(Dispatchers.IO)
+
     override fun sync(repo: SavedRepo, choices: Map<Choice, Keep>) {
         scope.launch(Dispatchers.IO) {
             records.saveChoices(repo.id, choices)
-            val request = OneTimeWorkRequestBuilder<SyncWorker>()
-                .addTag(TAG)
-                .addTag("$REPO_TAG${repo.id}")
-                .setInputData(workDataOf(SyncWorker.REPO to repo.id))
-                // Before Android 12, expedited work runs as a foreground service, which needs a notification of its own
-                .apply { if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) setExpedited(OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST) }
-                .build()
-            work.enqueueUniqueWork("sync-${repo.id}", ExistingWorkPolicy.KEEP, request)
+            work.enqueueUniqueWork("sync-${repo.id}", ExistingWorkPolicy.KEEP, request(repo))
         }
     }
+
+    override fun syncAll() {
+        scope.launch(Dispatchers.IO) {
+            val saved = repos.all.first().takeIf { it.isNotEmpty() } ?: return@launch
+            val run = UUID.randomUUID().toString()
+            records.startAll(run, saved.map { it.id })
+
+            // A chain runs one sync at a time; appended, so a run still going finishes first, its results unrecorded
+            var chain = work.beginUniqueWork(ALL_WORK, ExistingWorkPolicy.APPEND_OR_REPLACE, request(saved.first(), run))
+            for (repo in saved.drop(1)) chain = chain.then(request(repo, run))
+            chain.enqueue()
+        }
+    }
+
+    override fun closeAll() {
+        scope.launch(Dispatchers.IO) {
+            records.closeAll()
+            allClosed.update { it + 1 }
+        }
+    }
+
+    private fun request(repo: SavedRepo, all: String? = null) = OneTimeWorkRequestBuilder<SyncWorker>()
+        .addTag(TAG)
+        .addTag("$REPO_TAG${repo.id}")
+        .setInputData(workDataOf(SyncWorker.REPO to repo.id, SyncWorker.ALL to all))
+        // Before Android 12, expedited work runs as a foreground service, which needs a notification of its own
+        .apply { if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) setExpedited(OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST) }
+        .build()
 
     override fun setAuto(repo: SavedRepo, auto: AutoSync) {
         scope.launch(Dispatchers.IO) {
@@ -108,6 +149,7 @@ class WorkSyncer(
 
     private companion object {
         const val TAG = "sync"
+        const val ALL_WORK = "sync-all"
         const val REPO_TAG = "repo:"
     }
 }
@@ -124,7 +166,8 @@ class SyncWorker(context: Context, params: WorkerParameters) : CoroutineWorker(c
         synchronized(services.locks.of(id)) {
             // The wait can be long, and the work cancelled or the setting turned off meanwhile
             if (isStopped) return@withContext Result.success()
-            val saved = runBlocking { services.repos.all.first() }.find { it.id == id } ?: return@withContext Result.failure()
+            // Not a failure, which would fail the rest of a sync-all chain
+            val saved = runBlocking { services.repos.all.first() }.find { it.id == id } ?: return@withContext Result.success()
             if (automatic && saved.auto == AutoSync.OFF) return@withContext Result.success()
 
             val result = sync(services, saved, automatic)
@@ -156,6 +199,7 @@ class SyncWorker(context: Context, params: WorkerParameters) : CoroutineWorker(c
             // Before the sync stops showing as running, so the state shown next is this result
             services.records.saveResult(saved.id, result)
             services.outgoing.synced(saved)
+            inputData.getString(ALL)?.let { services.records.saveAllResult(it, saved.id, result) }
             return result
         } finally {
             services.steps.end(saved.id)
@@ -167,5 +211,8 @@ class SyncWorker(context: Context, params: WorkerParameters) : CoroutineWorker(c
 
         /** A [Run] by name; a run without one is the user's. */
         const val RUN = "run"
+
+        /** The sync of every repo this one is part of. */
+        const val ALL = "all"
     }
 }

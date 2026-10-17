@@ -42,6 +42,27 @@ class SyncRecordsTest {
     }
 
     @Test
+    fun keepsTheLastSyncOfAllUntilClosed() {
+        assertNull(records.all())
+
+        records.startAll("run", listOf("b", "a"))
+        records.saveAllResult("run", "b", SyncResult.Synced(1, 2))
+        assertEquals(AllRun(listOf("b", "a"), mapOf("b" to SyncResult.Synced(1, 2))), records.all())
+
+        records.closeAll()
+        assertNull(records.all())
+    }
+
+    @Test
+    fun recordsOnlyTheResultsOfTheLatestSyncOfAll() {
+        records.startAll("earlier", listOf("a"))
+        records.startAll("later", listOf("a"))
+        records.saveAllResult("earlier", "a", SyncResult.UpToDate)
+
+        assertEquals(AllRun(listOf("a")), records.all())
+    }
+
+    @Test
     fun readsAResultItCannotParseAsNone() {
         temp.root.resolve("syncs").mkdirs()
         temp.root.resolve("syncs/repo.result.json").writeText("")

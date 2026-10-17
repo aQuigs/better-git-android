@@ -10,6 +10,19 @@
     <string name="repos_add">Add a repo</string>
     <string name="sync">Sync</string>
     <string name="sync_with_choices">Sync with these choices</string>
+    <string name="sync_all">Sync all</string>
+    <string name="all_running">Syncing every repo (%1$d/%2$d)</string>
+    <string name="all_fine">Every repo synced</string>
+    <plurals name="all_needed">
+        <item quantity="one">%1$d of %2$d repos needs you</item>
+        <item quantity="other">%1$d of %2$d repos need you</item>
+    </plurals>
+    <string name="all_waiting">Waiting</string>
+    <string name="all_conflict">Conflicts to edit</string>
+    <string name="all_choose">Choices to make</string>
+    <string name="all_failed">Failed</string>
+    <string name="all_not_run">Didn\'t sync</string>
+    <string name="all_close">Close</string>
 
     <string name="state_never">Not synced yet</string>
     <string name="state_running">Syncing…</string>

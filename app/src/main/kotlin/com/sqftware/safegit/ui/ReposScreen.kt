@@ -47,6 +47,7 @@ import com.sqftware.safegit.sync.Pending
 import com.sqftware.safegit.sync.Problem
 import com.sqftware.safegit.sync.Step
 import com.sqftware.safegit.sync.SyncResult
+import com.sqftware.safegit.work.AllRun
 import com.sqftware.safegit.work.SyncState
 
 /**
@@ -55,7 +56,10 @@ import com.sqftware.safegit.work.SyncState
  */
 data class RepoRow(val repo: SavedRepo, val state: SyncState?, val canSignIn: Boolean = false, val pending: Pending? = null)
 
-/** The connected repos, under [header], such as the account syncs run as; [onSignIn] replaces a sign-in a remote refused. */
+/**
+ * The connected repos, under [header], such as the account syncs run as; [onSignIn] replaces a sign-in a remote refused.
+ * With more than one, they can all be synced at once; [all] is the last such sync.
+ */
 @Composable
 fun ReposScreen(
     rows: List<RepoRow>,
@@ -64,6 +68,9 @@ fun ReposScreen(
     onSignIn: () -> Unit = {},
     onAuto: (SavedRepo, AutoSync) -> Unit = { _, _ -> },
     onAbout: () -> Unit = {},
+    all: AllRun? = null,
+    onSyncAll: () -> Unit = {},
+    onCloseAll: () -> Unit = {},
     header: @Composable () -> Unit = {},
 ) {
     Scaffold(
@@ -71,6 +78,7 @@ fun ReposScreen(
     ) { padding ->
         LazyColumn(Modifier.fillMaxSize().padding(padding), contentPadding = PaddingValues(16.dp)) {
             item { header() }
+            if (rows.size > 1) item { SyncAllCard(rows, all, onSyncAll, onCloseAll) }
             if (rows.isEmpty()) {
                 item { Text(stringResource(R.string.repos_empty), Modifier.padding(8.dp), style = MaterialTheme.typography.bodyLarge) }
             }

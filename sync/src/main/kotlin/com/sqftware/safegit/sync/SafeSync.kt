@@ -51,6 +51,9 @@ sealed interface SyncResult {
     data class Choose(val choices: List<Choice>) : SyncResult
 
     data class Failed(val problem: Problem, val detail: String = "") : SyncResult
+
+    /** Whether the folder and the remote now agree, with nothing left for the user. */
+    val done: Boolean get() = this == UpToDate || this is Synced
 }
 
 /**
