@@ -1,10 +1,13 @@
 package com.sqftware.safegit
 
+import android.Manifest
 import android.content.ActivityNotFoundException
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
@@ -28,6 +31,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.net.toUri
 import com.sqftware.safegit.auth.DeviceCode
+import com.sqftware.safegit.repos.AutoSync
 import com.sqftware.safegit.repos.Connector
 import com.sqftware.safegit.storage.AllFilesAccess
 import com.sqftware.safegit.storage.StorageAccess
@@ -92,11 +96,19 @@ private fun Repos(services: Services, onAdd: () -> Unit) {
     val states by services.syncer.states.collectAsState(emptyMap())
     val account by services.signIn.state.collectAsState()
     val context = LocalContext.current
+    // Automatic syncs run without it too; it only lets them say when they need the user
+    val notifications = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {}
     ReposScreen(
         rows = repos?.map { RepoRow(it, states[it.id], services.signIn.canSignInAgain(it.url, account)) } ?: return,
         onSync = services.syncer::sync,
         onAdd = onAdd,
         onSignIn = services.signIn::signInAgain,
+        onAuto = { repo, auto ->
+            val granted = Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
+                context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
+            if (auto != AutoSync.OFF && !granted) notifications.launch(Manifest.permission.POST_NOTIFICATIONS)
+            services.syncer.setAuto(repo, auto)
+        },
         header = {
             AccountCard(
                 account,
@@ -150,7 +162,7 @@ private fun AddRepo(services: Services, state: Connector.State, onDone: () -> Un
 
 @Composable
 private fun colors() = when {
-    android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S -> {
+    Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
         val context = LocalContext.current
         if (isSystemInDarkTheme()) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
     }

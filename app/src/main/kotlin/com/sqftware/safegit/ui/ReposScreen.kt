@@ -1,6 +1,7 @@
 package com.sqftware.safegit.ui
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -11,6 +12,8 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.LinearProgressIndicator
@@ -18,15 +21,20 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import com.sqftware.safegit.R
+import com.sqftware.safegit.repos.AutoSync
 import com.sqftware.safegit.repos.SavedRepo
 import com.sqftware.safegit.sync.Choice
 import com.sqftware.safegit.sync.Keep
@@ -45,6 +53,7 @@ fun ReposScreen(
     onSync: (SavedRepo, Map<Choice, Keep>) -> Unit,
     onAdd: () -> Unit,
     onSignIn: () -> Unit = {},
+    onAuto: (SavedRepo, AutoSync) -> Unit = { _, _ -> },
     header: @Composable () -> Unit = {},
 ) {
     Scaffold(
@@ -56,18 +65,20 @@ fun ReposScreen(
                 item { Text(stringResource(R.string.repos_empty), Modifier.padding(8.dp), style = MaterialTheme.typography.bodyLarge) }
             }
             items(rows, key = { it.repo.id }) { row ->
-                RepoCard(row, onSync = { choices -> onSync(row.repo, choices) }, onSignIn)
+                RepoCard(row, onSync = { choices -> onSync(row.repo, choices) }, onSignIn, onAuto = { onAuto(row.repo, it) })
             }
         }
     }
 }
 
 @Composable
-private fun RepoCard(row: RepoRow, onSync: (Map<Choice, Keep>) -> Unit, onSignIn: () -> Unit) {
+private fun RepoCard(row: RepoRow, onSync: (Map<Choice, Keep>) -> Unit, onSignIn: () -> Unit, onAuto: (AutoSync) -> Unit) {
     Card(Modifier.fillMaxWidth().padding(bottom = 12.dp)) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text(row.repo.name, style = MaterialTheme.typography.titleMedium)
             Text(row.repo.url, style = MaterialTheme.typography.bodySmall)
+            // Here rather than with the choices, so picks made outlast a sync that runs meanwhile, such as an automatic one
+            val kept = remember(row.repo.id) { mutableStateMapOf<Choice, Keep>() }
 
             when (val state = row.state) {
                 null -> Text(stringResource(R.string.state_never))
@@ -75,30 +86,57 @@ private fun RepoCard(row: RepoRow, onSync: (Map<Choice, Keep>) -> Unit, onSignIn
                     Text(stringResource(if (state is SyncState.Running) stepText(state.step) else R.string.state_waiting))
                     LinearProgressIndicator(Modifier.fillMaxWidth())
                 }
-                is SyncState.Finished -> Outcome(state.result, onSync, row.canSignIn, onSignIn)
+                is SyncState.Finished -> Outcome(state.result, kept, onSync, row.canSignIn, onSignIn)
             }
 
             // A choice syncs with its own button
             val choosing = (row.state as? SyncState.Finished)?.result is SyncResult.Choose
-            if (!choosing) {
-                Button(onClick = { onSync(emptyMap()) }, enabled = row.state == null || row.state is SyncState.Finished) { Text(stringResource(R.string.sync)) }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                if (!choosing) {
+                    Button(onClick = { onSync(emptyMap()) }, enabled = row.state == null || row.state is SyncState.Finished) { Text(stringResource(R.string.sync)) }
+                }
+                AutoSyncPicker(row.repo.auto, onAuto)
             }
         }
     }
 }
 
 @Composable
-private fun Outcome(result: SyncResult, onSync: (Map<Choice, Keep>) -> Unit, canSignIn: Boolean, onSignIn: () -> Unit) {
+private fun AutoSyncPicker(auto: AutoSync, onPick: (AutoSync) -> Unit) {
+    var open by remember { mutableStateOf(false) }
+    Box {
+        TextButton(onClick = { open = true }) { Text(stringResource(R.string.auto_sync, stringResource(autoText(auto)))) }
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            for (option in AutoSync.entries) {
+                DropdownMenuItem(
+                    text = { Text(stringResource(autoText(option))) },
+                    onClick = {
+                        open = false
+                        if (option != auto) onPick(option)
+                    },
+                )
+            }
+        }
+    }
+}
+
+private fun autoText(auto: AutoSync) = when (auto) {
+    AutoSync.OFF -> R.string.auto_off
+    AutoSync.EVERY_15_MINUTES -> R.string.auto_15_minutes
+    AutoSync.HOURLY -> R.string.auto_hourly
+    AutoSync.EVERY_6_HOURS -> R.string.auto_6_hours
+    AutoSync.DAILY -> R.string.auto_daily
+    AutoSync.WEEKLY -> R.string.auto_weekly
+}
+
+@Composable
+private fun Outcome(result: SyncResult, kept: MutableMap<Choice, Keep>, onSync: (Map<Choice, Keep>) -> Unit, canSignIn: Boolean, onSignIn: () -> Unit) {
     when (result) {
         SyncResult.UpToDate -> Text(stringResource(R.string.state_up_to_date))
         is SyncResult.Synced -> Text(stringResource(R.string.state_synced))
-        is SyncResult.Conflict -> {
-            Text(stringResource(R.string.state_conflict))
-            Column {
-                for (path in result.paths) Text(path, fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodyMedium)
-            }
-        }
-        is SyncResult.Choose -> Choices(result.choices, onSync)
+        is SyncResult.Conflict -> Paths(stringResource(R.string.state_conflict), result.paths)
+        is SyncResult.ConflictAhead -> Paths(stringResource(R.string.state_conflict_ahead), result.paths)
+        is SyncResult.Choose -> Choices(result.choices, kept, onSync)
         is SyncResult.Failed -> {
             Failure(result.problem, result.detail)
             if (result.problem == Problem.SIGN_IN && canSignIn) OutlinedButton(onClick = onSignIn) { Text(stringResource(R.string.sign_in_again)) }
@@ -106,10 +144,17 @@ private fun Outcome(result: SyncResult, onSync: (Map<Choice, Keep>) -> Unit, can
     }
 }
 
+@Composable
+private fun Paths(explanation: String, paths: List<String>) {
+    Text(explanation)
+    Column {
+        for (path in paths) Text(path, fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodyMedium)
+    }
+}
+
 /** Asks for a [Keep] for each choice, and syncs with them once every one has one. */
 @Composable
-private fun Choices(choices: List<Choice>, onSync: (Map<Choice, Keep>) -> Unit) {
-    val kept = remember(choices) { mutableStateMapOf<Choice, Keep>() }
+private fun Choices(choices: List<Choice>, kept: MutableMap<Choice, Keep>, onSync: (Map<Choice, Keep>) -> Unit) {
     Text(stringResource(R.string.state_choose))
     for (choice in choices) {
         Column {
@@ -121,7 +166,8 @@ private fun Choices(choices: List<Choice>, onSync: (Map<Choice, Keep>) -> Unit) 
             }
         }
     }
-    Button(onClick = { onSync(kept.toMap()) }, enabled = kept.size == choices.size) { Text(stringResource(R.string.sync_with_choices)) }
+    // Picks for choices an earlier sync asked are left out, as each counts only against what it was made for
+    Button(onClick = { onSync(kept.filterKeys { it in choices }) }, enabled = choices.all { it in kept }) { Text(stringResource(R.string.sync_with_choices)) }
 }
 
 @Composable

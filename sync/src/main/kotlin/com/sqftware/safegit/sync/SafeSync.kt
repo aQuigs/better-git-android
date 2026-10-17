@@ -41,6 +41,12 @@ sealed interface SyncResult {
      */
     data class Conflict(val paths: List<String>) : SyncResult
 
+    /**
+     * Both sides changed the same lines of [paths], and the sync was told to leave conflicts for one the user starts:
+     * the local changes are committed, and nothing else changed. A sync that marks conflicts puts both versions in each.
+     */
+    data class ConflictAhead(val paths: List<String>) : SyncResult
+
     /** Changes that conflict markers cannot show. Nothing changed; the next sync needs a [Keep] for each of [choices]. */
     data class Choose(val choices: List<Choice>) : SyncResult
 
@@ -109,21 +115,33 @@ class SafeSync(
 ) {
     private val message = "Changes from $device"
 
-    /** Calls [step] as it starts each step, on the thread running the sync. */
+    /**
+     * Calls [step] as it starts each step, on the thread running the sync. A sync the user did not start, not
+     * [attended], leaves conflicts to one they do: a new one ends it as [SyncResult.ConflictAhead] before the folder
+     * moves, so markers never appear in a note the user has open, and a held one is never taken as resolved.
+     */
     fun sync(
         repo: Repo,
         credentials: Credentials = Credentials.NONE,
         choices: Map<Choice, Keep> = emptyMap(),
+        attended: Boolean = true,
         step: (Step) -> Unit = {},
-    ): SyncResult = nested(repo, credentials, choices, step, fetched = false).let { (result, problems) ->
+    ): SyncResult = nested(repo, credentials, choices, step, attended, fetched = false).let { (result, problems) ->
         // The user should hear about a submodule left behind even though the rest synced
         if (problems.isEmpty() || (result != SyncResult.UpToDate && result !is SyncResult.Synced)) result
         else SyncResult.Failed(Problem.SUBMODULE, problems.entries.joinToString("\n") { (path, problem) -> "$path: $problem" })
     }
 
     /** A sync whose submodules left as they were come back as data, for a parent repo to report. */
-    private fun nested(repo: Repo, credentials: Credentials, choices: Map<Choice, Keep>, step: (Step) -> Unit, fetched: Boolean): NestedSync {
-        val session = Session(RepoGit(git, repo, identity), credentials, choices, step, fetched)
+    private fun nested(
+        repo: Repo,
+        credentials: Credentials,
+        choices: Map<Choice, Keep>,
+        step: (Step) -> Unit,
+        attended: Boolean,
+        fetched: Boolean,
+    ): NestedSync {
+        val session = Session(RepoGit(git, repo, identity), credentials, choices, step, attended, fetched)
         val result = try {
             session.sync()
         } catch (e: GitFailure) {
@@ -140,12 +158,15 @@ class SafeSync(
         private val credentials: Credentials,
         private val choices: Map<Choice, Keep>,
         private val step: (Step) -> Unit,
+        private val attended: Boolean,
         private var fetched: Boolean,
     ) {
         private val folder = FolderUpdate(git)
         private val markers = Markers(device)
         private val held = HeldConflict(git, markers)
-        val submodules = SubmoduleSync(git, credentials, choices, step, now) { repo, choices -> nested(repo, credentials, choices, step, fetched = true) }
+        val submodules = SubmoduleSync(git, credentials, choices, step, now) { repo, choices ->
+            nested(repo, credentials, choices, step, attended, fetched = true)
+        }
 
         fun sync(): SyncResult {
             // Nothing else uses this git dir, so a lock left now is from a sync the system killed
@@ -161,7 +182,7 @@ class SafeSync(
             val upstream = "refs/remotes/$remote/${merge.removePrefix("refs/heads/")}"
 
             folder.resume()?.let { return SyncResult.Failed(Problem.FOLDER_WRITE, it.detail) }
-            held.left()?.let { return SyncResult.Conflict(it) }
+            held.left(finish = attended)?.let { return SyncResult.Conflict(it) }
 
             var pulled = 0
             var retry: Problem? = null
@@ -191,7 +212,9 @@ class SafeSync(
                     val target = when (combined) {
                         is Combined.Choose -> return SyncResult.Choose(combined.choices)
                         is Combined.Commit -> combined.commit
-                        is Combined.Marked -> held.record(combined.tree, upstreamHead, combined.paths)
+                        is Combined.Marked ->
+                            if (attended) held.record(combined.tree, upstreamHead, combined.paths)
+                            else return SyncResult.ConflictAhead(combined.paths)
                     }
                     if (base != null) {
                         git.check("update-ref", "refs/safegit/backup/${now()}", head!!)
