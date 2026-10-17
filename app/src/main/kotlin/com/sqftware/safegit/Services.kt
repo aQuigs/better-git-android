@@ -3,6 +3,8 @@ package com.sqftware.safegit
 import android.content.Context
 import android.os.Build
 import androidx.work.WorkManager
+import com.sqftware.safegit.about.AssetLicenses
+import com.sqftware.safegit.about.LicenseSource
 import com.sqftware.safegit.auth.GitHubDeviceFlow
 import com.sqftware.safegit.auth.KeystoreTokenStore
 import com.sqftware.safegit.auth.SignIn
@@ -37,6 +39,7 @@ class Services private constructor(context: Context) {
     /** Installing rewrites git's links, so it happens once per process, on first use off the main thread. */
     val git: Git by lazy { BundledGit(context).install() }
     val device: String = Build.MODEL
+    val licenses: LicenseSource = AssetLicenses { path -> context.assets.open(path).bufferedReader().use { it.readText() } }
 
     // Kept out of backups: a git dir can be large, and the remote has it all
     private val gitDirs = context.noBackupFilesDir.resolve("repos")

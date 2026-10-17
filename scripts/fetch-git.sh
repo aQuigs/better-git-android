@@ -5,6 +5,7 @@
 #   <assets dir>/git/links           "<path> <packaged name>" per symlink the app makes into nativeLibraryDir:
 #                                    exec/<name> for git and its helpers, lib/<soname> for a soname that is not lib*.so
 #   <assets dir>/git/packages        "<package> <version>" per Termux package used, for the GPL source offer
+#   <assets dir>/git/licenses/<package>  the package's license text, as Termux ships it
 # Termux builds against bionic with 16 KB page alignment, which is what Play requires of every bundled ELF.
 # Usage: scripts/fetch-git.sh <jniLibs dir> <assets dir>
 # Bash 3 compatible, since macOS ships no newer one.
@@ -56,21 +57,40 @@ visit git
 
 ROOT=$WORK/root
 mkdir -p "$ROOT"
-for PKG in $SEEN; do
-  curl -fsSL "$REPO/$(field "$PKG" Filename)" -o "$WORK/$PKG.deb"
-  echo "$(field "$PKG" SHA256)  $WORK/$PKG.deb" | shasum -a 256 -c - > /dev/null
-  echo "$PKG $(field "$PKG" Version)" >> "$ASSETS/packages"
+unpack() {
+  curl -fsSL "$REPO/$(field "$1" Filename)" -o "$WORK/$1.deb"
+  echo "$(field "$1" SHA256)  $WORK/$1.deb" | shasum -a 256 -c - > /dev/null
 
   # dpkg-deb on Linux; on macOS bsdtar reads the .deb, which macOS's own ar cannot
   if command -v dpkg-deb > /dev/null; then
-    dpkg-deb -x "$WORK/$PKG.deb" "$ROOT"
+    dpkg-deb -x "$WORK/$1.deb" "$ROOT"
   else
-    tar -xOf "$WORK/$PKG.deb" 'data.tar.*' | tar -xf - -C "$ROOT"
+    tar -xOf "$WORK/$1.deb" 'data.tar.*' | tar -xf - -C "$ROOT"
   fi
+}
+for PKG in $SEEN; do
+  unpack "$PKG"
+  echo "$PKG $(field "$PKG" Version)" >> "$ASSETS/packages"
 done
+# Holds the common license texts that packages' copyright files link to; it ships no code
+unpack termux-licenses
 sort -o "$ASSETS/packages" "$ASSETS/packages"
 
 PREFIX=$ROOT/data/data/com.termux/files/usr
+
+mkdir -p "$ASSETS/licenses"
+for PKG in $SEEN; do
+  # A package under several licenses ships one file each, which a rule keeps apart
+  for FILE in "$PREFIX/share/doc/$PKG"/copyright*; do
+    if [ ! -f "$FILE" ]; then
+      echo "Termux package $PKG ships no license file" >&2
+      exit 1
+    fi
+    [ -s "$ASSETS/licenses/$PKG" ] && printf '\n%s\n\n' "------------------------------------------------------------------------" >> "$ASSETS/licenses/$PKG"
+    cat "$FILE" >> "$ASSETS/licenses/$PKG"
+  done
+done
+
 cp "$PREFIX/bin/git" "$LIBS/libgit.so"
 cp "$PREFIX/libexec/git-core/git-remote-http" "$LIBS/libgit-remote-http.so"
 cat > "$ASSETS/links" <<EOF

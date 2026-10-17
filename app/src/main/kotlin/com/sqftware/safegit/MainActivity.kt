@@ -26,22 +26,27 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.net.toUri
+import com.sqftware.safegit.about.Licenses
 import com.sqftware.safegit.auth.DeviceCode
 import com.sqftware.safegit.repos.AutoSync
 import com.sqftware.safegit.repos.Connector
 import com.sqftware.safegit.storage.AllFilesAccess
 import com.sqftware.safegit.storage.StorageAccess
 import com.sqftware.safegit.storage.folderOf
+import com.sqftware.safegit.ui.AboutScreen
 import com.sqftware.safegit.ui.AccessScreen
 import com.sqftware.safegit.ui.AccountCard
 import com.sqftware.safegit.ui.AddRepoScreen
 import com.sqftware.safegit.ui.RepoRow
 import com.sqftware.safegit.ui.ReposScreen
 import java.io.File
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 class MainActivity : ComponentActivity() {
     private val access: StorageAccess by lazy { AllFilesAccess(this) }
@@ -73,6 +78,7 @@ class MainActivity : ComponentActivity() {
 @Composable
 private fun App(services: Services) {
     var adding by rememberSaveable { mutableStateOf(false) }
+    var about by rememberSaveable { mutableStateOf(false) }
     val connecting by services.connector.state.collectAsState()
 
     // Also when the user left the add screen while it connected
@@ -83,15 +89,25 @@ private fun App(services: Services) {
         }
     }
 
-    if (adding) {
-        AddRepo(services, connecting, onDone = { adding = false })
-    } else {
-        Repos(services, onAdd = { adding = true })
+    when {
+        adding -> AddRepo(services, connecting, onDone = { adding = false })
+        about -> About(services, onDone = { about = false })
+        else -> Repos(services, onAdd = { adding = true }, onAbout = { about = true })
     }
 }
 
 @Composable
-private fun Repos(services: Services, onAdd: () -> Unit) {
+private fun About(services: Services, onDone: () -> Unit) {
+    val context = LocalContext.current
+    val licenses by produceState<Licenses?>(null) { value = withContext(Dispatchers.IO) { services.licenses.load() } }
+    val info = context.packageManager.getPackageInfo(context.packageName, 0)
+    BackHandler(onBack = onDone)
+
+    AboutScreen("${info.versionName} (${info.longVersionCode})", licenses, onOpen = { open(context, it) })
+}
+
+@Composable
+private fun Repos(services: Services, onAdd: () -> Unit, onAbout: () -> Unit) {
     val repos by services.repos.all.collectAsState(null)
     val states by services.syncer.states.collectAsState(emptyMap())
     val account by services.signIn.state.collectAsState()
@@ -109,6 +125,7 @@ private fun Repos(services: Services, onAdd: () -> Unit) {
             if (auto != AutoSync.OFF && !granted) notifications.launch(Manifest.permission.POST_NOTIFICATIONS)
             services.syncer.setAuto(repo, auto)
         },
+        onAbout = onAbout,
         header = {
             AccountCard(
                 account,
@@ -124,8 +141,12 @@ private fun Repos(services: Services, onAdd: () -> Unit) {
 /** Copies the code for pasting on GitHub's page, and opens it; the card shows the address for a phone with no browser. */
 private fun openCode(context: Context, code: DeviceCode) {
     context.getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText(code.userCode, code.userCode))
+    open(context, code.verificationUri)
+}
+
+private fun open(context: Context, uri: String) {
     try {
-        context.startActivity(Intent(Intent.ACTION_VIEW, code.verificationUri.toUri()))
+        context.startActivity(Intent(Intent.ACTION_VIEW, uri.toUri()))
     } catch (_: ActivityNotFoundException) {
     }
 }

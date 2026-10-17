@@ -56,7 +56,7 @@ Git Sync (ViscousPot/GitSync, Flutter + libgit2) loses work: its pull merges and
 
 ## Open questions and risks
 
-- **Binaries:** each build takes Termux's latest packages, so security fixes arrive with Termux. git is GPLv2: the app needs a source offer naming the versions listed in `assets/git/packages`.
+- **Binaries:** each build takes Termux's latest packages, so security fixes arrive with Termux. git is GPLv2 (libiconv LGPL): the About screen lists the versions in `assets/git/packages` with each package's license and makes a written offer of their source, by email, for three years. So every shipped version's sources must stay obtainable: Termux's recipe at that version and the upstream release.
 - **Case twins on the remote:** a remote (from Linux) holding two names that differ only by case blocks every sync (`FOLDER_BLOCKED`) until it is fixed there. Nothing is lost, but the UI should explain it.
 - **Residual window:** a notes app saving a file in the instant between `FolderUpdate`'s last check and its rename would lose that save.
 - **Renamed only by case on the phone:** git with `core.ignorecase` never records it. When an update changes that file, `FolderUpdate` first gives it HEAD's spelling back if its content is still HEAD's, as desktop git's checkout would. The user's rename is undone; nothing else is lost.
@@ -92,6 +92,7 @@ sync/src/main/kotlin/com/sqftware/safegit/
 └── sync/                # SafeSync (one sync: commit, fetch, merge, move the folder, push), FolderUpdate, RepoSetup
 app/src/main/kotlin/com/sqftware/safegit/
 ├── MainActivity.kt      # all-files access, then the repo list or the add screen
+├── about/               # the licenses of what the app ships, for the About screen
 ├── auth/                # GitHub device-flow sign-in, and the token in the Keystore
 ├── Services.kt          # the app's singletons: repo store, sync records, bundled git
 ├── git/BundledGit.kt    # sets up the git binaries shipped as native libraries
