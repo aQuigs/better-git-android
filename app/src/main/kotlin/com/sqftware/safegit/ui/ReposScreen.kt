@@ -54,6 +54,7 @@ fun ReposScreen(
     onAdd: () -> Unit,
     onSignIn: () -> Unit = {},
     onAuto: (SavedRepo, AutoSync) -> Unit = { _, _ -> },
+    onAbout: () -> Unit = {},
     header: @Composable () -> Unit = {},
 ) {
     Scaffold(
@@ -67,6 +68,7 @@ fun ReposScreen(
             items(rows, key = { it.repo.id }) { row ->
                 RepoCard(row, onSync = { choices -> onSync(row.repo, choices) }, onSignIn, onAuto = { onAuto(row.repo, it) })
             }
+            item { TextButton(onClick = onAbout) { Text(stringResource(R.string.about_open)) } }
         }
     }
 }

@@ -86,4 +86,20 @@
     <string name="add_folder_overlaps">This folder is, holds or sits inside a folder that is already connected.</string>
     <string name="add_folder_unusable">Choose a folder on this phone\'s storage.</string>
     <string name="cancel">Cancel</string>
+
+    <string name="about_open">About and licenses</string>
+    <string name="about_title">About SafeGit</string>
+    <string name="about_version">Version %1$s</string>
+    <string name="about_app">SafeGit is free software under the MIT License, and its source is public.</string>
+    <string name="about_source">SafeGit\'s source on GitHub</string>
+    <string name="about_git_title">Git and its libraries</string>
+    <string name="about_git_body">SafeGit runs git with these libraries, built by the Termux project. Tap one to read its license.</string>
+    <string name="about_offer_title">Source code offer</string>
+    <string name="about_offer">Git and some of the libraries above are licensed under the GNU General Public License or Lesser General Public License. For at least three years after you got this version of SafeGit, anyone can get the complete source code of each package above, at the version shown, by writing to %1$s, for no more than the cost of sending it. SafeGit changes one thing in git, the path of the shell it runs, with scripts/fetch-git.sh in its own source.</string>
+    <string name="about_offer_ask">Ask for the source</string>
+    <string name="about_offer_subject">SafeGit %1$s: source code request</string>
+    <string name="about_offer_termux">How Termux builds each package</string>
+    <string name="about_libraries_title">Android libraries</string>
+    <string name="about_app_libraries">Jetpack Compose, AndroidX and Kotlin</string>
+    <string name="about_apache">Apache License 2.0</string>
 </resources>
