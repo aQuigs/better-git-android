@@ -97,7 +97,9 @@ private fun RepoCard(row: RepoRow, onSync: (Map<Choice, Keep>) -> Unit, onSignIn
                 }
                 is SyncState.Finished -> Outcome(state.result, kept, onSync, row.canSignIn, onSignIn)
             }
-            row.pending?.let { PendingFiles(it) }
+            // A sync under way is changing the answer, and a read during its folder update takes pulled files for local ones
+            val syncing = row.state == SyncState.Waiting || row.state is SyncState.Running
+            if (!syncing) row.pending?.let { PendingFiles(it) }
 
             // A choice syncs with its own button
             val choosing = (row.state as? SyncState.Finished)?.result is SyncResult.Choose

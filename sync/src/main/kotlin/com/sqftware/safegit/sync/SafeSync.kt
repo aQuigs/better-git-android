@@ -105,7 +105,8 @@ internal fun GitResult.remoteProblem(otherwise: Problem) =
  * of a file in it between markers, as a rebase would, or changes nothing and asks which version to keep. The commits a
  * sync replaces stay reachable under refs/safegit/backup/.
  *
- * Callers run one sync per repo at a time, and nothing else may run git in its git dir.
+ * Callers run one sync per repo at a time, and nothing else may run git in its git dir but reads that take no lock on
+ * its index or refs, as [PendingChanges] does.
  */
 class SafeSync(
     private val git: Git,
@@ -169,7 +170,7 @@ class SafeSync(
         }
 
         fun sync(): SyncResult {
-            // Nothing else uses this git dir, so a lock left now is from a sync the system killed
+            // Nothing else locks the repo's index or refs, so a lock left now is from a sync the system killed
             git.repo.gitDir.walk().onEnter { it.name != "objects" }.filter { it.isFile && it.name.endsWith(".lock") }
                 .forEach(File::delete)
 

@@ -178,6 +178,14 @@ class ReposScreenTest {
     }
 
     @Test
+    fun hidesTheCountWhileSyncing() {
+        val pending = Pending(changed = listOf("ideas.md"), added = emptyList(), deleted = emptyList())
+        compose.setContent { ReposScreen(listOf(RepoRow(vault, SyncState.Running(Step.MERGE), pending = pending)), onSync = { _, _ -> }, onAdd = {}) }
+
+        compose.onNodeWithText("To sync", substring = true).assertDoesNotExist()
+    }
+
+    @Test
     fun saysWhenThereIsNothingToPush() {
         val nothing = Pending(emptyList(), emptyList(), emptyList())
         compose.setContent { ReposScreen(listOf(RepoRow(vault, null, pending = nothing)), onSync = { _, _ -> }, onAdd = {}) }
