@@ -57,6 +57,7 @@ class SyncRecords(private val dir: File) {
         SyncResult.UpToDate -> JSONObject().put("type", "upToDate")
         is SyncResult.Synced -> JSONObject().put("type", "synced").put("pulled", result.pulled).put("pushed", result.pushed)
         is SyncResult.Conflict -> JSONObject().put("type", "conflict").put("paths", JSONArray(result.paths))
+        is SyncResult.ConflictAhead -> JSONObject().put("type", "conflictAhead").put("paths", JSONArray(result.paths))
         is SyncResult.Choose -> JSONObject().put("type", "choose").put("choices", JSONArray(result.choices.map(::encode)))
         is SyncResult.Failed -> JSONObject().put("type", "failed").put("problem", result.problem.name).put("detail", result.detail)
     }
@@ -65,6 +66,7 @@ class SyncRecords(private val dir: File) {
         "upToDate" -> SyncResult.UpToDate
         "synced" -> SyncResult.Synced(json.getInt("pulled"), json.getInt("pushed"))
         "conflict" -> SyncResult.Conflict(json.getJSONArray("paths").strings())
+        "conflictAhead" -> SyncResult.ConflictAhead(json.getJSONArray("paths").strings())
         "choose" -> SyncResult.Choose(json.getJSONArray("choices").objects().map(::decodeChoice))
         "failed" -> SyncResult.Failed(Problem.valueOf(json.getString("problem")), json.getString("detail"))
         else -> throw IllegalArgumentException("Unknown sync result $type")

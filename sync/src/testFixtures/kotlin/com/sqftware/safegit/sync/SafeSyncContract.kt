@@ -157,6 +157,52 @@ abstract class SafeSyncContract(tempParent: File? = null, workTreeParent: File? 
     }
 
     @Test
+    fun anUnattendedSyncLeavesAConflictToOneTheUserStarts() {
+        laptop.write("laptop.md", "from the laptop\n")
+        val remoteHead = conflictInNotes()
+        files.write("phone.md", "from the phone\n")
+        val head = phoneGit("rev-parse", "HEAD")
+
+        assertEquals(SyncResult.ConflictAhead(listOf("notes.md")), sync(attended = false))
+
+        assertEquals("one\nPHONE\nthree\n", files.read("notes.md"))
+        assertFalse(files.resolve("laptop.md").exists())
+        assertEquals(remoteHead, git.ok(remote, "rev-parse", "main"))
+        assertEquals(head, phoneGit("rev-parse", "HEAD^"))
+        assertEquals("", phoneGit("status", "--porcelain"))
+        assertEquals(SyncResult.ConflictAhead(listOf("notes.md")), sync(attended = false))
+
+        assertEquals(SyncResult.Conflict(listOf("notes.md")), sync())
+        assertEquals("one\n<<<<<<< Pixel\nPHONE\n=======\nLAPTOP\n>>>>>>> remote\nthree\n", files.read("notes.md"))
+        assertEquals("from the laptop\n", files.read("laptop.md"))
+    }
+
+    @Test
+    fun onlyASyncTheUserStartsTakesAnEditAsTheResolution() {
+        val remoteHead = conflictInNotes()
+        sync()
+        // Halfway: the marker lines gone, both versions still there
+        files.write("notes.md", "one\nPHONE\n=======\nLAPTOP\nthree\n")
+
+        assertEquals(SyncResult.Conflict(listOf("notes.md")), sync(attended = false))
+        assertEquals(remoteHead, git.ok(remote, "rev-parse", "main"))
+
+        files.write("notes.md", "one\nPHONE and LAPTOP\nthree\n")
+        assertEquals(SyncResult.Synced(pulled = 0, pushed = 1), sync())
+    }
+
+    @Test
+    fun anUnattendedSyncStillPullsWhatMergesCleanly() {
+        laptop.write("laptop.md", "from the laptop\n")
+        laptop.commitAndPush("laptop work")
+        files.write("phone.md", "from the phone\n")
+
+        assertEquals(SyncResult.Synced(pulled = 1, pushed = 1), sync(attended = false))
+
+        assertEquals("from the laptop\n", files.read("laptop.md"))
+    }
+
+    @Test
     fun pushesNothingWhileMarkersAreLeft() {
         val remoteHead = conflictInNotes()
         files.write("ideas.md", "merges cleanly\n")
@@ -828,6 +874,19 @@ abstract class SafeSyncContract(tempParent: File? = null, workTreeParent: File? 
     }
 
     @Test
+    fun aSubmoduleLeavesAConflictWhenItsParentsSyncIsUnattended() {
+        val library = addLibrary()
+        sync()
+        library.write("lib.md", "LAPTOP\n")
+        library.commitAndPush("laptop library edit")
+        files.write("lib/lib.md", "PHONE\n")
+
+        assertEquals(SyncResult.ConflictAhead(listOf("lib/lib.md")), sync(attended = false))
+
+        assertEquals("PHONE\n", files.read("lib/lib.md"))
+    }
+
+    @Test
     fun setsUpNestedSubmodules() {
         val deep = libraryRepo("deep")
         val library = libraryRepo()
@@ -1388,8 +1447,13 @@ abstract class SafeSyncContract(tempParent: File? = null, workTreeParent: File? 
 
     private fun asked(result: SyncResult) = (result as? SyncResult.Choose)?.choices ?: throw AssertionError("Not a choice: $result")
 
-    private fun sync(git: Git = this.git, repo: Repo = phone, choices: Map<Choice, Keep> = emptyMap(), step: (Step) -> Unit = {}) =
-        SafeSync(git, PHONE, device = "Pixel", now = { 1000 }).sync(repo, choices = choices, step = step)
+    private fun sync(
+        git: Git = this.git,
+        repo: Repo = phone,
+        choices: Map<Choice, Keep> = emptyMap(),
+        attended: Boolean = true,
+        step: (Step) -> Unit = {},
+    ) = SafeSync(git, PHONE, device = "Pixel", now = { 1000 }).sync(repo, choices = choices, attended = attended, step = step)
 
     /** Both sides change the second line of notes.md; returns the remote's commit, which has the laptop's change. */
     private fun conflictInNotes(): String {

@@ -2,6 +2,7 @@ package com.sqftware.safegit
 
 import android.content.Context
 import android.os.Build
+import androidx.work.WorkManager
 import com.sqftware.safegit.auth.GitHubDeviceFlow
 import com.sqftware.safegit.auth.KeystoreTokenStore
 import com.sqftware.safegit.auth.SignIn
@@ -15,6 +16,9 @@ import com.sqftware.safegit.repos.RepoStore
 import com.sqftware.safegit.repos.SavedRepo
 import com.sqftware.safegit.sync.Identity
 import com.sqftware.safegit.sync.Repo
+import com.sqftware.safegit.work.AutoSchedule
+import com.sqftware.safegit.work.NotificationBoard
+import com.sqftware.safegit.work.SyncNotices
 import com.sqftware.safegit.work.SyncRecords
 import com.sqftware.safegit.work.SyncSteps
 import com.sqftware.safegit.work.Syncer
@@ -27,7 +31,8 @@ import kotlinx.coroutines.flow.map
 /** What the app's parts share, built once per process. */
 class Services private constructor(context: Context) {
     val repos: RepoStore = FileRepoStore(context.filesDir.resolve("repos.json"))
-    val records = SyncRecords(context.filesDir.resolve("syncs"))
+    private val syncs = context.filesDir.resolve("syncs")
+    val records = SyncRecords(syncs)
 
     /** Installing rewrites git's links, so it happens once per process, on first use off the main thread. */
     val git: Git by lazy { BundledGit(context).install() }
@@ -47,7 +52,9 @@ class Services private constructor(context: Context) {
     )
     val accountRepos = AccountRepos(GitHubRepoDirectory(signIn::token), signIn.state.map { it is SignIn.State.SignedIn }, scope)
     val steps = SyncSteps()
-    val syncer: Syncer = WorkSyncer(context, repos, records, steps, scope)
+    val schedule = AutoSchedule(WorkManager.getInstance(context))
+    val notices = SyncNotices(syncs, NotificationBoard(context))
+    val syncer: Syncer = WorkSyncer(context, repos, records, steps, schedule, scope)
 
     // Connecting commits nothing, so who it runs as never shows
     val connector = Connector({ git }, Identity("SafeGit", "safegit@users.noreply.github.com"), signIn::credentials, repos, syncer, ::gitDir, scope)

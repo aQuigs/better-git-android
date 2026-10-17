@@ -7,6 +7,7 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.performClick
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import com.sqftware.safegit.repos.AutoSync
 import com.sqftware.safegit.repos.SavedRepo
 import com.sqftware.safegit.sync.Choice
 import com.sqftware.safegit.sync.Keep
@@ -14,6 +15,9 @@ import com.sqftware.safegit.sync.Problem
 import com.sqftware.safegit.sync.Step
 import com.sqftware.safegit.sync.SyncResult
 import com.sqftware.safegit.work.SyncState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
@@ -66,6 +70,34 @@ class ReposScreenTest {
     }
 
     @Test
+    fun listsTheFilesAnAutomaticSyncLeftForTheUser() {
+        val ahead = SyncState.Finished(SyncResult.ConflictAhead(listOf("ideas.md")))
+        compose.setContent { ReposScreen(listOf(RepoRow(vault, ahead)), onSync = { _, _ -> }, onAdd = {}) }
+
+        compose.onNodeWithText("An automatic sync leaves them as they are", substring = true).assertExists()
+        compose.onNodeWithText("ideas.md").assertExists()
+        compose.onNodeWithText("Sync").assertIsEnabled()
+    }
+
+    @Test
+    fun setsHowOftenARepoSyncsOnItsOwn() {
+        val picked = mutableListOf<Pair<SavedRepo, AutoSync>>()
+        compose.setContent { ReposScreen(listOf(RepoRow(vault, null)), onSync = { _, _ -> }, onAdd = {}, onAuto = { repo, auto -> picked += repo to auto }) }
+
+        compose.onNodeWithText("Auto sync: Off").performClick()
+        compose.onNodeWithText("Every 6 hours").performClick()
+
+        assertEquals(listOf(vault to AutoSync.EVERY_6_HOURS), picked)
+    }
+
+    @Test
+    fun showsTheRepoAutoSyncSetting() {
+        compose.setContent { ReposScreen(listOf(RepoRow(vault.copy(auto = AutoSync.WEEKLY), null)), onSync = { _, _ -> }, onAdd = {}) }
+
+        compose.onNodeWithText("Auto sync: Every week").assertExists()
+    }
+
+    @Test
     fun saysWhichSubmodulesWereLeftAsTheyWere() {
         val left = SyncState.Finished(SyncResult.Failed(Problem.SUBMODULE, "lib: It is not on a branch."))
         compose.setContent { ReposScreen(listOf(RepoRow(vault, left)), onSync = { _, _ -> }, onAdd = {}) }
@@ -105,6 +137,25 @@ class ReposScreenTest {
         compose.onNodeWithText("This phone has it, the remote deleted it").assertExists()
         compose.onAllNodesWithText("Keep this phone's")[0].performClick()
         compose.onNodeWithText("Sync with these choices").assertIsNotEnabled()
+        compose.onAllNodesWithText("Keep the remote's")[1].performClick()
+        compose.onNodeWithText("Sync with these choices").performClick()
+
+        assertEquals(listOf(mapOf(photo to Keep.LOCAL, deleted to Keep.REMOTE)), synced)
+    }
+
+    @Test
+    fun keepsPicksMadeBeforeASyncThatAsksTheSame() {
+        val photo = Choice("photo.png", local = "a1", remote = "b2")
+        val deleted = Choice("old.md", local = "c3", remote = null)
+        val asked = SyncState.Finished(SyncResult.Choose(listOf(photo, deleted)))
+        var state by mutableStateOf<SyncState>(asked)
+        val synced = mutableListOf<Map<Choice, Keep>>()
+        compose.setContent { ReposScreen(listOf(RepoRow(vault, state)), onSync = { _, choices -> synced += choices }, onAdd = {}) }
+
+        compose.onAllNodesWithText("Keep this phone's")[0].performClick()
+        state = SyncState.Running(Step.FETCH)
+        compose.waitForIdle()
+        state = asked
         compose.onAllNodesWithText("Keep the remote's")[1].performClick()
         compose.onNodeWithText("Sync with these choices").performClick()
 

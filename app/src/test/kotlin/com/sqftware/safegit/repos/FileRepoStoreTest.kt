@@ -23,6 +23,23 @@ class FileRepoStoreTest {
             save(notes.copy(url = "https://example.com/moved.git"))
         }
 
-        assertEquals(listOf(work, notes.copy(url = "https://example.com/moved.git")), FileRepoStore(file).all.first())
+        assertEquals(listOf(notes.copy(url = "https://example.com/moved.git"), work), FileRepoStore(file).all.first())
+    }
+
+    @Test
+    fun keepsHowOftenEachSyncsOnItsOwn() = runBlocking {
+        val file = temp.root.resolve("repos.json")
+        val notes = SavedRepo("a", "https://example.com/notes.git", File("/storage/emulated/0/Documents/Notes"), AutoSync.HOURLY)
+        FileRepoStore(file).save(notes)
+
+        assertEquals(listOf(notes), FileRepoStore(file).all.first())
+    }
+
+    @Test
+    fun syncsOnlyWhenAskedARepoSavedBeforeAutomaticSyncs() = runBlocking {
+        val file = temp.root.resolve("repos.json")
+        file.writeText("""[{"id":"a","url":"https://example.com/notes.git","folder":"/sdcard/Notes"}]""")
+
+        assertEquals(AutoSync.OFF, FileRepoStore(file).all.first().single().auto)
     }
 }

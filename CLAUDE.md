@@ -18,7 +18,12 @@ Git Sync (ViscousPot/GitSync, Flutter + libgit2) loses work: its pull merges and
 - **Storage:** repos live in shared storage (e.g. an Obsidian vault in `Documents/`) under the All-files access permission (`MANAGE_EXTERNAL_STORAGE`), declared as core functionality on Play. SAF cannot back git (no paths, lstat or locking). To keep object and index I/O off the slow FUSE layer, the repo's git dir sits in app-private storage and points at the shared worktree, with `core.untrackedCache` on. On the emulator with the notes repo (about 2,800 files), this split layout brings `status` from 36 ms to 9 ms, and committing 20 edits from 0.4–0.65 s to 0.14 s, compared with the whole repo in shared storage.
 - **Auth:** ease of use first. GitHub sign-in uses the OAuth device flow, which needs no client secret or backend; the OAuth app's public client id is `safegit.githubClientId` in `gradle.properties`. The token is encrypted under an Android Keystore key and reaches git as an `http.https://github.com/.extraHeader` through `GIT_CONFIG_COUNT`, never argv or a config file. Commits carry the account's name and noreply email. HTTPS only to start, so a submodule declared by an SSH URL (as a laptop often adds one) is fetched from the same host and path over HTTPS; SSH (a bundled ssh client) comes later if needed.
 - **Connecting a folder:** `RepoSetup` makes the private git dir and sets the folder storage's rules (`core.ignorecase`, `core.symlinks` probed there; no file mode). A folder with a `.git` of its own (as Git Sync leaves) starts from that repo's commit, but only when it is at rest, not sparse, and on the same remote branch; otherwise connecting is refused, since the first sync would push markers, deletions or another repo's files.
-- **Sync is manual:** a button, nothing in the background yet. A sync takes seconds, so it runs as expedited WorkManager work, not a foreground service.
+- **Syncs:** the Sync button runs one as expedited WorkManager work, not a foreground service, since it takes seconds. Each repo can also sync on its own (off by default; every 15 min up to weekly) as periodic WorkManager work that needs a network and a battery that isn't low; turning it on runs the first at once. An automatic sync:
+  - is unattended (`attended = false`): a conflict stops it as `ConflictAhead` before the folder moves, so markers only appear from the button.
+  - waits 5 min while a changed file was saved in the last minute (`RecentEdits`), which narrows the residual window below; files inside submodules are not checked yet.
+  - never takes an edit as a held conflict's resolution: a user halfway through one may pause. Only the button finishes it.
+  - retries a failure that may pass hourly when its period is 6 h or more; a shorter period waits for its next run.
+  - notifies only what needs the user (a conflict, a choice, the sign-in refused, a failure that has lasted a day), once per change of state (`SyncNotices`).
 
 ## Sync must never lose data
 
@@ -93,7 +98,7 @@ app/src/main/kotlin/com/sqftware/safegit/
 ├── net/                 # one HTTP request, for GitHub's sign-in and API
 ├── repos/               # the connected repos, saved as JSON; Connector, which adds one; the account's repos to pick from
 ├── storage/             # all-files access, folder picker URI → path, atomic JSON files
-├── work/                # each sync as WorkManager work, and its saved result and choices
+├── work/                # each sync as WorkManager work, started or scheduled; its saved result, choices and notifications
 └── ui/                  # Compose screens, tested with fake data
 scripts/fetch-git.sh     # downloads Termux's git and lays it out as jniLibs and assets
 ```
