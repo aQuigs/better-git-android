@@ -95,6 +95,23 @@ await "Synced"
 shot synced
 [ "$(adb shell cat $FOLDER/welcome.md)" == "$(cat $WORK/laptop/welcome.md)" ] || fail "welcome.md did not arrive"
 
+echo "== The card says what the next sync pushes"
+await "No changes on this phone to sync" 10
+phone_writes daily/2026-10-13.md '- wrote the e2e\n- and ran it\n'
+phone_writes ideas.md 'a new idea\n'
+# Read as the app comes to the front, not while it shows
+adb shell input keyevent KEYCODE_HOME
+sleep 1
+adb shell am start -n $APP/.MainActivity >/dev/null
+await "To sync: 1 changed, 1 new ▾" 10
+tap "To sync: 1 changed, 1 new ▾"
+await "ideas.md" 10
+shot pending
+tap "Sync"
+await "No changes on this phone to sync"
+shot pending-none
+laptop pull -q
+
 echo "== Both change the same line"
 phone_writes welcome.md '# Welcome\n\nThese notes sync with SafeGit.\n\nToday: phone wants to read.\n'
 printf '# Welcome\n\nThese notes sync with SafeGit.\n\nToday: laptop wants to write.\n' > $WORK/laptop/welcome.md

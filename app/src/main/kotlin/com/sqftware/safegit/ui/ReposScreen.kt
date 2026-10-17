@@ -1,5 +1,8 @@
 package com.sqftware.safegit.ui
 
+import androidx.annotation.PluralsRes
+import androidx.annotation.StringRes
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -27,9 +30,11 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
@@ -38,13 +43,17 @@ import com.sqftware.safegit.repos.AutoSync
 import com.sqftware.safegit.repos.SavedRepo
 import com.sqftware.safegit.sync.Choice
 import com.sqftware.safegit.sync.Keep
+import com.sqftware.safegit.sync.Pending
 import com.sqftware.safegit.sync.Problem
 import com.sqftware.safegit.sync.Step
 import com.sqftware.safegit.sync.SyncResult
 import com.sqftware.safegit.work.SyncState
 
-/** A connected repo as the list shows it; [canSignIn] when a new sign-in could help its remote, and none is under way. */
-data class RepoRow(val repo: SavedRepo, val state: SyncState?, val canSignIn: Boolean = false)
+/**
+ * A connected repo as the list shows it; [canSignIn] when a new sign-in could help its remote, and none is under way.
+ * [pending] is what its next sync would push, when known.
+ */
+data class RepoRow(val repo: SavedRepo, val state: SyncState?, val canSignIn: Boolean = false, val pending: Pending? = null)
 
 /** The connected repos, under [header], such as the account syncs run as; [onSignIn] replaces a sign-in a remote refused. */
 @Composable
@@ -88,6 +97,7 @@ private fun RepoCard(row: RepoRow, onSync: (Map<Choice, Keep>) -> Unit, onSignIn
                 }
                 is SyncState.Finished -> Outcome(state.result, kept, onSync, row.canSignIn, onSignIn)
             }
+            row.pending?.let { PendingFiles(it) }
 
             // A choice syncs with its own button
             val choosing = (row.state as? SyncState.Finished)?.result is SyncResult.Choose
@@ -100,6 +110,48 @@ private fun RepoCard(row: RepoRow, onSync: (Map<Choice, Keep>) -> Unit, onSignIn
         }
     }
 }
+
+/** A count of the files the next sync would push, which opens into the files themselves. */
+@Composable
+private fun PendingFiles(pending: Pending) {
+    if (pending.isEmpty()) {
+        Text(stringResource(R.string.pending_none), style = MaterialTheme.typography.bodyMedium)
+        return
+    }
+
+    var open by rememberSaveable { mutableStateOf(false) }
+    val kinds = listOf(
+        Kind(R.plurals.pending_changed, R.string.pending_changed_file, pending.changed),
+        Kind(R.plurals.pending_new, R.string.pending_new_file, pending.added),
+        Kind(R.plurals.pending_deleted, R.string.pending_deleted_file, pending.deleted),
+    ).filter { it.paths.isNotEmpty() }
+    val counts = kinds.map { pluralStringResource(it.count, it.paths.size, it.paths.size) }.joinToString(", ")
+    Text(
+        stringResource(if (open) R.string.pending_hide else R.string.pending_show, counts),
+        Modifier.clickable { open = !open },
+        color = MaterialTheme.colorScheme.primary,
+        style = MaterialTheme.typography.bodyMedium,
+    )
+    if (!open) return
+
+    // A first sync of a whole vault can hold thousands of files, too many to lay out in a card
+    val files = kinds.flatMap { kind -> kind.paths.map { it to kind.label } }
+    Column {
+        for ((path, label) in files.take(MAX_FILES)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text(path, Modifier.weight(1f), fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodyMedium)
+                Text(stringResource(label), style = MaterialTheme.typography.bodySmall)
+            }
+        }
+        val more = files.size - MAX_FILES
+        if (more > 0) Text(pluralStringResource(R.plurals.pending_more, more, more), style = MaterialTheme.typography.bodySmall)
+    }
+}
+
+/** One kind of change: the [count] line's part, and the [label] beside each of its [paths]. */
+private class Kind(@PluralsRes val count: Int, @StringRes val label: Int, val paths: List<String>)
+
+private const val MAX_FILES = 100
 
 @Composable
 private fun AutoSyncPicker(auto: AutoSync, onPick: (AutoSync) -> Unit) {

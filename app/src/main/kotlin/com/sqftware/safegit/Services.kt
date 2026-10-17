@@ -17,7 +17,9 @@ import com.sqftware.safegit.repos.SavedRepo
 import com.sqftware.safegit.sync.Identity
 import com.sqftware.safegit.sync.Repo
 import com.sqftware.safegit.work.AutoSchedule
+import com.sqftware.safegit.sync.PendingChanges
 import com.sqftware.safegit.work.NotificationBoard
+import com.sqftware.safegit.work.Outgoing
 import com.sqftware.safegit.work.SyncNotices
 import com.sqftware.safegit.work.SyncRecords
 import com.sqftware.safegit.work.SyncSteps
@@ -55,6 +57,7 @@ class Services private constructor(context: Context) {
     val schedule = AutoSchedule(WorkManager.getInstance(context))
     val notices = SyncNotices(syncs, NotificationBoard(context))
     val syncer: Syncer = WorkSyncer(context, repos, records, steps, schedule, scope)
+    val outgoing = Outgoing(repos, { PendingChanges(git).of(repo(it)) }, scope)
 
     // Connecting commits nothing, so who it runs as never shows
     val connector = Connector({ git }, Identity("SafeGit", "safegit@users.noreply.github.com"), signIn::credentials, repos, syncer, ::gitDir, scope)

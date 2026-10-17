@@ -157,6 +157,7 @@ class SyncWorker(context: Context, params: WorkerParameters) : CoroutineWorker(c
             }
             // Before the sync stops showing as running, so the state shown next is this result
             services.records.saveResult(saved.id, result)
+            services.outgoing.refresh(saved)
             return result
         } finally {
             services.steps.end(saved.id)
