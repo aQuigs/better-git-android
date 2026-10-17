@@ -3,6 +3,7 @@ package com.sqftware.safegit.ui
 import android.net.Uri
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
@@ -101,7 +102,14 @@ private fun LicenseText(title: String, text: String) {
     Scaffold { padding ->
         Column(Modifier.fillMaxSize().padding(padding).verticalScroll(rememberScrollState()).padding(24.dp)) {
             Text(title, style = MaterialTheme.typography.headlineSmall)
-            Text(text, Modifier.padding(top = 16.dp), style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace)
+            // License texts are laid out in fixed-width lines that wrapping would break up
+            Text(
+                text,
+                Modifier.padding(top = 16.dp).horizontalScroll(rememberScrollState()),
+                style = MaterialTheme.typography.bodySmall,
+                fontFamily = FontFamily.Monospace,
+                softWrap = false,
+            )
         }
     }
 }
