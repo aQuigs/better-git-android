@@ -2,7 +2,7 @@ package com.sqftware.safegit.sync
 
 import java.io.File
 
-/** A submodule as a commit declares it, with [url] resolved against the parent's remote and [commit] the one recorded. */
+/** A submodule as a commit declares it, with [url] resolved against the parent's remote and taken over HTTPS, and [commit] the one recorded. */
 internal data class Submodule(val name: String, val path: String, val url: String, val branch: String?, val commit: String)
 
 /**
@@ -29,7 +29,7 @@ internal class Submodules(private val git: RepoGit) {
 
         val submodules = variables.mapNotNull { (name, values) ->
             val path = values["path"] ?: return@mapNotNull null
-            val url = values["url"]?.takeIf { !it.startsWith("-") }?.let { resolveUrl(parentUrl, it) } ?: return@mapNotNull null
+            val url = values["url"]?.takeIf { !it.startsWith("-") }?.let { overHttps(resolveUrl(parentUrl, it)) } ?: return@mapNotNull null
             // A name becomes a folder in the git dir, so one climbing out of it is refused, as git refuses it
             if (name.isEmpty() || '\n' in name || name.split('/', '\\').any { it == ".." } || File(name).isAbsolute) return@mapNotNull null
             // A path on this device would copy whatever is there into the folder; only a repo cloned from one may name one
