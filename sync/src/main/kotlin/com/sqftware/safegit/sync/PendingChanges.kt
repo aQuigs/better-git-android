@@ -21,12 +21,8 @@ class PendingChanges(private val git: Git) {
         val git = RepoGit(git, repo, NOBODY)
         if (git.head() == null) return null
         val upstream = git.branch()?.let(git::upstream) ?: return null
-        val base = when {
-            // A remote without commits takes everything
-            git.resolve("$upstream^{commit}") == null -> git.emptyTree
-            // As SafeSync's base: commits the remote dropped with a force push leave the branch rather than go back
-            else -> git.output("merge-base", "--fork-point", upstream, "HEAD") ?: git.output("merge-base", "HEAD", upstream) ?: return null
-        }
+        // A remote without commits takes everything
+        val base = if (git.resolve("$upstream^{commit}") == null) git.emptyTree else git.base(upstream)?.commit ?: return null
 
         val (tracked, untracked) = onScratchIndex(git) { environment ->
             // Entries alternate a status letter and a path
@@ -62,7 +58,6 @@ class PendingChanges(private val git: Git) {
     }
 
     private companion object {
-        val NOBODY = Identity("", "")
         const val ADDED = "A"
         const val MODIFIED = "M"
         const val DELETED = "D"

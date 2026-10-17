@@ -66,7 +66,13 @@ class MainActivity : ComponentActivity() {
     // What each repo would push is read as the app comes to the front, rather than watched
     override fun onStart() {
         super.onStart()
-        Services.of(this).outgoing.refresh()
+        Services.of(this).outgoing.show()
+    }
+
+    // A rotation is no trip to the back, and need not read every repo again
+    override fun onStop() {
+        super.onStop()
+        if (!isChangingConfigurations) Services.of(this).outgoing.hide()
     }
 
     // The user grants all-files access in Settings and comes back here

@@ -20,8 +20,7 @@
     <string name="step_update_folder">Updating the folder…</string>
     <string name="step_push">Pushing…</string>
     <string name="pending_none">No changes on this phone to sync</string>
-    <string name="pending_show">To sync: %1$s ▾</string>
-    <string name="pending_hide">To sync: %1$s ▴</string>
+    <string name="pending_count">To sync: %1$s</string>
     <plurals name="pending_changed">
         <item quantity="one">%1$d changed</item>
         <item quantity="other">%1$d changed</item>

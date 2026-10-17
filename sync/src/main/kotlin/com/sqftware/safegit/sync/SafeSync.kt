@@ -105,8 +105,7 @@ internal fun GitResult.remoteProblem(otherwise: Problem) =
  * of a file in it between markers, as a rebase would, or changes nothing and asks which version to keep. The commits a
  * sync replaces stay reachable under refs/safegit/backup/.
  *
- * Callers run one sync per repo at a time, and nothing else may run git in its git dir but reads that take no lock on
- * its index or refs, as [PendingChanges] does.
+ * Callers run one sync per repo at a time, and nothing else may run git in its git dir.
  */
 class SafeSync(
     private val git: Git,
@@ -170,7 +169,7 @@ class SafeSync(
         }
 
         fun sync(): SyncResult {
-            // Nothing else locks the repo's index or refs, so a lock left now is from a sync the system killed
+            // Nothing else uses this git dir, so a lock left now is from a sync the system killed
             git.repo.gitDir.walk().onEnter { it.name != "objects" }.filter { it.isFile && it.name.endsWith(".lock") }
                 .forEach(File::delete)
 
@@ -296,16 +295,7 @@ class SafeSync(
 
         private fun count(revision: String) = git.check("rev-list", "--count", revision).stdout.trim().toInt()
 
-        /**
-         * Where the local changes start: the fork point, which unlike the merge base leaves out commits the remote has
-         * since dropped with a force push. [Base.rewound] says the remote did drop some, so even with nothing new to
-         * pull, they must leave the local branch rather than be pushed back.
-         */
-        private fun base(upstream: String): Base {
-            val mergeBase = git.output("merge-base", "HEAD", upstream)
-            val forkPoint = git.output("merge-base", "--fork-point", upstream, "HEAD")
-            return Base(forkPoint ?: mergeBase ?: git.emptyTree, rewound = forkPoint != null && forkPoint != mergeBase)
-        }
+        private fun base(upstream: String) = git.base(upstream) ?: Base(git.emptyTree, rewound = false)
 
         /** Builds the commit that puts the local changes since [base] on top of [upstreamHead]. */
         private fun combine(upstreamHead: String, base: String): Combined {
@@ -400,8 +390,6 @@ class SafeSync(
             return merged.stdout.trim()
         }
     }
-
-    private class Base(val commit: String, val rewound: Boolean)
 
     private sealed interface Combined {
         data class Commit(val commit: String) : Combined

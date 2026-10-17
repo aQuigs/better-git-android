@@ -13,8 +13,9 @@ import kotlinx.coroutines.launch
 import java.util.concurrent.ConcurrentHashMap
 
 /**
- * What each repo's next sync would push, read by [read] when asked rather than continuously, since reading a large
- * shared folder takes a while. Reads run one at a time, and a repo asked for again before its read starts is read once.
+ * What each repo's next sync would push, read by [read] while the app is in front rather than watched, since reading a
+ * large shared folder takes a while. Reads run one at a time, and a repo asked for again before its read starts is read
+ * once.
  */
 class Outgoing(private val repos: RepoStore, private val read: (SavedRepo) -> Pending?, private val scope: CoroutineScope) {
     private val current = MutableStateFlow<Map<String, Pending>>(emptyMap())
@@ -23,6 +24,9 @@ class Outgoing(private val repos: RepoStore, private val read: (SavedRepo) -> Pe
     val pending: StateFlow<Map<String, Pending>> = current
     private val due = ConcurrentHashMap.newKeySet<String>()
     private val wake = Channel<Unit>(Channel.CONFLATED)
+
+    @Volatile
+    private var shown = false
 
     init {
         scope.launch {
@@ -34,13 +38,21 @@ class Outgoing(private val repos: RepoStore, private val read: (SavedRepo) -> Pe
         }
     }
 
-    /** Reads every repo's again, such as when the app comes to the front. */
-    fun refresh() {
+    /** The app came to the front: reads every repo's again, and each one's after it syncs, until [hide]. */
+    fun show() {
+        if (shown) return
+        shown = true
         scope.launch { ask(repos.all.first()) }
     }
 
-    /** Reads [repo]'s again, such as after it synced. */
-    fun refresh(repo: SavedRepo) = ask(listOf(repo))
+    fun hide() {
+        shown = false
+    }
+
+    /** [repo] synced, so what it would push has changed; out of sight, it is only forgotten until the app is in front. */
+    fun synced(repo: SavedRepo) {
+        if (shown) ask(listOf(repo)) else current.update { it - repo.id }
+    }
 
     private fun ask(repos: List<SavedRepo>) {
         due.addAll(repos.map { it.id })

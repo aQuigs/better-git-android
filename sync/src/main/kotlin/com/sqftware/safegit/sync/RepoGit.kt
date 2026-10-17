@@ -53,6 +53,17 @@ internal class RepoGit(val cli: Git, val repo: Repo, val identity: Identity) {
         return "refs/remotes/$remote/${merge.removePrefix("refs/heads/")}"
     }
 
+    /**
+     * Where the local changes start against [upstream], or null when the two share no history: the fork point, which
+     * unlike the merge base leaves out commits the remote has since dropped with a force push. [Base.rewound] says the
+     * remote did drop some, so even with nothing new to pull, they must leave the local branch rather than be pushed back.
+     */
+    fun base(upstream: String): Base? {
+        val mergeBase = output("merge-base", "HEAD", upstream)
+        val forkPoint = output("merge-base", "--fork-point", upstream, "HEAD")
+        return (forkPoint ?: mergeBase)?.let { Base(it, rewound = forkPoint != null && forkPoint != mergeBase) }
+    }
+
     /** The same git for another repo, such as a submodule. */
     fun at(repo: Repo) = RepoGit(cli, repo, identity)
 
@@ -87,6 +98,11 @@ internal class RepoGit(val cli: Git, val repo: Repo, val identity: Identity) {
         const val NO = 1
     }
 }
+
+internal class Base(val commit: String, val rewound: Boolean)
+
+/** For git that only reads, so commits as nobody. */
+internal val NOBODY = Identity("", "")
 
 /** One path's entry on each side of a diff; a side without one has mode [ABSENT]. */
 internal class Change(val path: String, val oldMode: String, val newMode: String, val oldBlob: String, val newBlob: String) {

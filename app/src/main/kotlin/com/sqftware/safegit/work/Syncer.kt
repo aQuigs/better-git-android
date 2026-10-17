@@ -31,7 +31,6 @@ import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
-import java.util.concurrent.ConcurrentHashMap
 import kotlin.time.Duration
 
 /** Where a repo's sync stands: waiting to start, running, or the last one's result. */
@@ -121,9 +120,8 @@ class SyncWorker(context: Context, params: WorkerParameters) : CoroutineWorker(c
         val automatic = run != Run.USER
         val again = { delay: Duration -> services.schedule.again(id, delay, from = run) }
 
-        // Unique work is not enough: a stopped worker's sync runs on, since git cannot be cancelled, while WorkManager
-        // starts the same work again. The lock is held by the thread running git, so the rerun waits for it.
-        synchronized(locks.computeIfAbsent(id) { Any() }) {
+        // Unique work is not enough: a rerun of a stopped worker waits for the sync it left running
+        synchronized(services.locks.of(id)) {
             // The wait can be long, and the work cancelled or the setting turned off meanwhile
             if (isStopped) return@withContext Result.success()
             val saved = runBlocking { services.repos.all.first() }.find { it.id == id } ?: return@withContext Result.failure()
@@ -157,7 +155,7 @@ class SyncWorker(context: Context, params: WorkerParameters) : CoroutineWorker(c
             }
             // Before the sync stops showing as running, so the state shown next is this result
             services.records.saveResult(saved.id, result)
-            services.outgoing.refresh(saved)
+            services.outgoing.synced(saved)
             return result
         } finally {
             services.steps.end(saved.id)
@@ -169,6 +167,5 @@ class SyncWorker(context: Context, params: WorkerParameters) : CoroutineWorker(c
 
         /** A [Run] by name; a run without one is the user's. */
         const val RUN = "run"
-        private val locks = ConcurrentHashMap<String, Any>()
     }
 }

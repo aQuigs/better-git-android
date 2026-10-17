@@ -97,9 +97,7 @@ private fun RepoCard(row: RepoRow, onSync: (Map<Choice, Keep>) -> Unit, onSignIn
                 }
                 is SyncState.Finished -> Outcome(state.result, kept, onSync, row.canSignIn, onSignIn)
             }
-            // A sync under way is changing the answer, and a read during its folder update takes pulled files for local ones
-            val syncing = row.state == SyncState.Waiting || row.state is SyncState.Running
-            if (!syncing) row.pending?.let { PendingFiles(it) }
+            row.pending?.let { PendingFiles(it) }
 
             // A choice syncs with its own button
             val choosing = (row.state as? SyncState.Finished)?.result is SyncResult.Choose
@@ -129,7 +127,7 @@ private fun PendingFiles(pending: Pending) {
     ).filter { it.paths.isNotEmpty() }
     val counts = kinds.map { pluralStringResource(it.count, it.paths.size, it.paths.size) }.joinToString(", ")
     Text(
-        stringResource(if (open) R.string.pending_hide else R.string.pending_show, counts),
+        stringResource(R.string.pending_count, counts) + if (open) " ▴" else " ▾",
         Modifier.clickable { open = !open },
         color = MaterialTheme.colorScheme.primary,
         style = MaterialTheme.typography.bodyMedium,
@@ -137,15 +135,15 @@ private fun PendingFiles(pending: Pending) {
     if (!open) return
 
     // A first sync of a whole vault can hold thousands of files, too many to lay out in a card
-    val files = kinds.flatMap { kind -> kind.paths.map { it to kind.label } }
+    val files = kinds.asSequence().flatMap { kind -> kind.paths.asSequence().map { it to kind.label } }.take(MAX_FILES).toList()
     Column {
-        for ((path, label) in files.take(MAX_FILES)) {
+        for ((path, label) in files) {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text(path, Modifier.weight(1f), fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodyMedium)
                 Text(stringResource(label), style = MaterialTheme.typography.bodySmall)
             }
         }
-        val more = files.size - MAX_FILES
+        val more = kinds.sumOf { it.paths.size } - files.size
         if (more > 0) Text(pluralStringResource(R.plurals.pending_more, more, more), style = MaterialTheme.typography.bodySmall)
     }
 }
