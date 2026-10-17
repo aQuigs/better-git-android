@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:pathData="M40,31 V77"
+        android:strokeColor="#42A5F5"
+        android:strokeLineCap="round"
+        android:strokeWidth="4.5" />
+    <path
+        android:pathData="M40,31 C40,38 56,33 56,42 V66 C56,75 40,70 40,77"
+        android:strokeColor="#66BB6A"
+        android:strokeLineCap="round"
+        android:strokeWidth="4.5" />
+    <path
+        android:pathData="M56,42 C56,50 72,46 72,54 C72,62 56,58 56,66"
+        android:strokeColor="#FFB300"
+        android:strokeLineCap="round"
+        android:strokeWidth="4.5" />
+    <path
+        android:fillColor="@color/ic_launcher_background"
+        android:pathData="M33,31a7,7 0 1,0 14,0a7,7 0 1,0 -14,0" />
+    <path
+        android:fillColor="#42A5F5"
+        android:pathData="M35,31a5,5 0 1,0 10,0a5,5 0 1,0 -10,0" />
+    <path
+        android:fillColor="@color/ic_launcher_background"
+        android:pathData="M33,77a7,7 0 1,0 14,0a7,7 0 1,0 -14,0" />
+    <path
+        android:fillColor="#42A5F5"
+        android:pathData="M35,77a5,5 0 1,0 10,0a5,5 0 1,0 -10,0" />
+    <path
+        android:fillColor="@color/ic_launcher_background"
+        android:pathData="M49,42a7,7 0 1,0 14,0a7,7 0 1,0 -14,0" />
+    <path
+        android:fillColor="#66BB6A"
+        android:pathData="M51,42a5,5 0 1,0 10,0a5,5 0 1,0 -10,0" />
+    <path
+        android:fillColor="@color/ic_launcher_background"
+        android:pathData="M49,66a7,7 0 1,0 14,0a7,7 0 1,0 -14,0" />
+    <path
+        android:fillColor="#66BB6A"
+        android:pathData="M51,66a5,5 0 1,0 10,0a5,5 0 1,0 -10,0" />
+    <path
+        android:fillColor="@color/ic_launcher_background"
+        android:pathData="M65,54a7,7 0 1,0 14,0a7,7 0 1,0 -14,0" />
+    <path
+        android:fillColor="#FFB300"
+        android:pathData="M67,54a5,5 0 1,0 10,0a5,5 0 1,0 -10,0" />
+</vector>
