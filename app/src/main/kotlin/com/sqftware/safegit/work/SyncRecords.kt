@@ -14,21 +14,13 @@ import org.json.JSONObject
 import java.io.File
 
 /**
- * Each repo's last sync result and the choices for its next one, kept in files: WorkManager's own data is capped at
- * 10 KB, which a long list of conflicted paths can pass. Every call blocks on file I/O.
+ * Each repo's last sync result and the choices for its next one, and the last sync of every repo, kept in files:
+ * WorkManager's own data is capped at 10 KB, which a long list of conflicted paths can pass. Every call blocks on file
+ * I/O.
  */
 class SyncRecords(private val dir: File) {
     /** The last result, or null when there is none or this version cannot read it. */
-    fun result(id: String): SyncResult? {
-        val file = file(id, RESULT).takeIf { it.exists() } ?: return null
-        return try {
-            decode(JSONObject(file.readText()))
-        } catch (_: JSONException) {
-            null
-        } catch (_: IllegalArgumentException) {
-            null
-        }
-    }
+    fun result(id: String): SyncResult? = read(file(id, RESULT)) { decode(it) }
 
     @Synchronized
     fun saveResult(id: String, result: SyncResult) = file(id, RESULT).writeAtomically(encode(result).toString())
@@ -49,6 +41,46 @@ class SyncRecords(private val dir: File) {
         val array = JSONArray(file.readText())
         file.delete()
         return array.objects().associate { decodeChoice(it) to Keep.valueOf(it.getString("keep")) }
+    }
+
+    /** The last sync of every repo, never [AllRun.going], or null when there is none or it was closed. */
+    fun all(): AllRun? = readAll()?.let { (_, run) -> run }
+
+    /** Starts a sync of every repo in [ids], whose results only a sync of the same [run] records. */
+    @Synchronized
+    fun startAll(run: String, ids: List<String>) = writeAll(run, AllRun(ids))
+
+    @Synchronized
+    fun saveAllResult(run: String, id: String, result: SyncResult) {
+        val (saved, all) = readAll() ?: return
+        if (saved == run) writeAll(run, all.copy(results = all.results + (id to result)))
+    }
+
+    @Synchronized
+    fun closeAll() {
+        dir.resolve(ALL).delete()
+    }
+
+    private fun readAll(): Pair<String, AllRun>? = read(dir.resolve(ALL)) { json ->
+        val results = json.getJSONObject("results")
+        json.getString("run") to AllRun(json.getJSONArray("ids").strings(), results.keys().asSequence().associateWith { decode(results.getJSONObject(it)) })
+    }
+
+    /** What [file] holds, or null when there is none or this version cannot read it. */
+    private fun <T> read(file: File, parse: (JSONObject) -> T): T? {
+        if (!file.exists()) return null
+        return try {
+            parse(JSONObject(file.readText()))
+        } catch (_: JSONException) {
+            null
+        } catch (_: IllegalArgumentException) {
+            null
+        }
+    }
+
+    private fun writeAll(run: String, all: AllRun) {
+        val results = JSONObject().apply { for ((id, result) in all.results) put(id, encode(result)) }
+        dir.resolve(ALL).writeAtomically(JSONObject().put("run", run).put("ids", JSONArray(all.ids)).put("results", results).toString())
     }
 
     private fun file(id: String, kind: String) = dir.resolve("$id.$kind.json")
@@ -80,5 +112,6 @@ class SyncRecords(private val dir: File) {
     private companion object {
         const val RESULT = "result"
         const val CHOICES = "choices"
+        const val ALL = "all.json"
     }
 }

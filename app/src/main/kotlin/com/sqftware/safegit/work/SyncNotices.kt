@@ -33,7 +33,7 @@ class SyncNotices(private val dir: File, private val board: NoticeBoard, private
         val failingSince = if (result is SyncResult.Failed) last.failingSince ?: now() else null
         val need = need(result, failingSince)
         val shown = when {
-            result == SyncResult.UpToDate || result is SyncResult.Synced -> null
+            result.done -> null
             // Seen in the app, so an automatic sync that comes to the same need not say it again
             !automatic -> need?.key
             // A failure that may pass leaves a conflict's notice up, since the conflict is still there

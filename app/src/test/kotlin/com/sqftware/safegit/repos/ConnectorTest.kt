@@ -6,6 +6,7 @@ import com.sqftware.safegit.sync.Credentials
 import com.sqftware.safegit.sync.Identity
 import com.sqftware.safegit.sync.Keep
 import com.sqftware.safegit.sync.Problem
+import com.sqftware.safegit.work.AllRun
 import com.sqftware.safegit.work.SyncState
 import com.sqftware.safegit.work.Syncer
 import kotlinx.coroutines.CoroutineScope
@@ -38,6 +39,12 @@ class ConnectorTest {
         }
 
         override fun setAuto(repo: SavedRepo, auto: AutoSync) = Unit
+
+        override val all: Flow<AllRun?> = emptyFlow()
+
+        override fun syncAll() = Unit
+
+        override fun closeAll() = Unit
     }
     private lateinit var remote: File
     private lateinit var folder: File

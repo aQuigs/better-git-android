@@ -15,6 +15,7 @@ import com.sqftware.safegit.sync.Pending
 import com.sqftware.safegit.sync.Problem
 import com.sqftware.safegit.sync.Step
 import com.sqftware.safegit.sync.SyncResult
+import com.sqftware.safegit.work.AllRun
 import com.sqftware.safegit.work.SyncState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -31,6 +32,8 @@ class ReposScreenTest {
     val compose = createComposeRule()
 
     private val vault = SavedRepo("1", "https://github.com/me/notes.git", File("/storage/emulated/0/Documents/notes"))
+    private val journal = SavedRepo("2", "https://github.com/me/journal.git", File("/storage/emulated/0/Documents/journal"))
+    private val photos = SavedRepo("3", "https://github.com/me/photos.git", File("/storage/emulated/0/Documents/photos"))
     private val refused = SyncState.Finished(SyncResult.Failed(Problem.SIGN_IN, "fatal: could not read Username for 'https://github.com': terminal prompts disabled"))
 
     @Test
@@ -183,6 +186,73 @@ class ReposScreenTest {
         compose.setContent { ReposScreen(listOf(RepoRow(vault, null, pending = nothing)), onSync = { _, _ -> }, onAdd = {}) }
 
         compose.onNodeWithText("No changes on this phone to sync").assertExists()
+    }
+
+    @Test
+    fun syncsEveryRepo() {
+        val asking = SyncState.Finished(SyncResult.Choose(listOf(Choice("photo.png", "a1", "b2"))))
+        var syncs = 0
+        val rows = listOf(RepoRow(vault, null), RepoRow(journal, SyncState.Running(Step.FETCH)), RepoRow(photos, asking))
+        compose.setContent { ReposScreen(rows, onSync = { _, _ -> }, onAdd = {}, onSyncAll = { syncs++ }) }
+
+        // Whatever each repo's state, as the sync of each starts once the one before it is done
+        compose.onNodeWithText("Sync all").assertIsEnabled()
+        compose.onNodeWithText("Sync all").performClick()
+
+        assertEquals(1, syncs)
+    }
+
+    @Test
+    fun offersNoSyncOfAllForOneRepo() {
+        compose.setContent { ReposScreen(listOf(RepoRow(vault, null)), onSync = { _, _ -> }, onAdd = {}) }
+
+        compose.onNodeWithText("Sync all").assertDoesNotExist()
+    }
+
+    @Test
+    fun saysHowFarTheSyncOfAllGot() {
+        val all = AllRun(listOf("1", "2", "3"), mapOf("1" to SyncResult.Synced(1, 0)), going = true)
+        val rows = listOf(RepoRow(vault, null), RepoRow(journal, SyncState.Running(Step.PUSH)), RepoRow(photos, SyncState.Waiting))
+        compose.setContent { ReposScreen(rows, onSync = { _, _ -> }, onAdd = {}, all = all) }
+
+        compose.onNodeWithText("Syncing every repo (1/3)").assertExists()
+        compose.onNodeWithText("Syncing…").assertExists()
+        compose.onNodeWithText("Waiting").assertExists()
+        compose.onNodeWithText("Sync all").assertIsNotEnabled()
+        compose.onNodeWithText("Close").assertDoesNotExist()
+    }
+
+    @Test
+    fun sumsUpTheSyncOfAllWithItsOwnResults() {
+        val all = AllRun(listOf("1", "2"), mapOf("1" to SyncResult.UpToDate, "2" to SyncResult.Failed(Problem.FETCH, "no network")))
+        // A sync since, such as an automatic one, changes the repo's card but not the run's result
+        val rows = listOf(RepoRow(vault, SyncState.Running(Step.FETCH)), RepoRow(journal, SyncState.Finished(SyncResult.UpToDate)))
+        var closed = 0
+        compose.setContent { ReposScreen(rows, onSync = { _, _ -> }, onAdd = {}, all = all, onCloseAll = { closed++ }) }
+
+        compose.onNodeWithText("1 of 2 repos needs you").assertExists()
+        compose.onNodeWithText("Failed").assertExists()
+        compose.onNodeWithText("Sync all").assertIsEnabled()
+        compose.onNodeWithText("Close").performClick()
+
+        assertEquals(1, closed)
+    }
+
+    @Test
+    fun saysWhichReposTheSyncOfAllNeverReached() {
+        val all = AllRun(listOf("1", "2"), mapOf("1" to SyncResult.Synced(0, 1)))
+        compose.setContent { ReposScreen(listOf(RepoRow(vault, null), RepoRow(journal, null)), onSync = { _, _ -> }, onAdd = {}, all = all) }
+
+        compose.onNodeWithText("1 of 2 repos needs you").assertExists()
+        compose.onNodeWithText("Didn't sync").assertExists()
+    }
+
+    @Test
+    fun saysWhenTheSyncOfAllSyncedEveryRepo() {
+        val all = AllRun(listOf("1", "2"), mapOf("1" to SyncResult.Synced(0, 1), "2" to SyncResult.UpToDate))
+        compose.setContent { ReposScreen(listOf(RepoRow(vault, null), RepoRow(journal, null)), onSync = { _, _ -> }, onAdd = {}, all = all) }
+
+        compose.onNodeWithText("Every repo synced").assertExists()
     }
 
     @Test

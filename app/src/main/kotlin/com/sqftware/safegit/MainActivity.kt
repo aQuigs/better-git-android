@@ -122,6 +122,7 @@ private fun About(services: Services, onDone: () -> Unit) {
 private fun Repos(services: Services, onAdd: () -> Unit, onAbout: () -> Unit) {
     val repos by services.repos.all.collectAsState(null)
     val states by services.syncer.states.collectAsState(emptyMap())
+    val all by services.syncer.all.collectAsState(null)
     val account by services.signIn.state.collectAsState()
     val pending by services.outgoing.pending.collectAsState()
     val context = LocalContext.current
@@ -139,6 +140,9 @@ private fun Repos(services: Services, onAdd: () -> Unit, onAbout: () -> Unit) {
             services.syncer.setAuto(repo, auto)
         },
         onAbout = onAbout,
+        all = all,
+        onSyncAll = services.syncer::syncAll,
+        onCloseAll = services.syncer::closeAll,
         header = {
             AccountCard(
                 account,
