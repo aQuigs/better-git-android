@@ -22,8 +22,4 @@ class RecentEdits(private val git: Git) {
             if (entry.endsWith("/")) file.walk().filter(File::isFile).toList() else listOf(file)
         }.map(File::lastModified).filter { it > 0 }.maxOrNull()
     }
-
-    private companion object {
-        val NOBODY = Identity("", "")
-    }
 }

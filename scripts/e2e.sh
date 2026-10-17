@@ -34,6 +34,7 @@ tap() { local at; at=$(center "$1"); [ -n "$at" ] || fail "no '$1' on screen"; a
 # Runs the command after the message until it succeeds, for at most WITHIN seconds
 within() { local why=$1; shift; local end=$((SECONDS + ${WITHIN:-60})); until "$@"; do [ $SECONDS -lt $end ] || fail "$why"; sleep 1; done; }
 shown() { [ -n "$(center "$1")" ]; }
+stopped() { adb shell dumpsys activity -p $APP activities | grep -q 'state=STOPPED'; }
 await() { WITHIN=${2:-60} within "no '$1' within ${2:-60} s" shown "$1"; }
 # Back closes only the keyboard while it is up
 shot() { adb shell dumpsys input_method | grep -q 'mInputShown=true' && adb shell input keyevent 4 && sleep 1; adb exec-out screencap -p > $OUT/$1.png; }
@@ -94,6 +95,23 @@ tap "Connect"
 await "Synced"
 shot synced
 [ "$(adb shell cat $FOLDER/welcome.md)" == "$(cat $WORK/laptop/welcome.md)" ] || fail "welcome.md did not arrive"
+
+echo "== The card says what the next sync pushes"
+await "No changes on this phone to sync" 10
+phone_writes daily/2026-10-13.md '- wrote the e2e\n- and ran it\n'
+phone_writes ideas.md 'a new idea\n'
+# Read as the app comes to the front, not while it shows; Android stops it a second or two after Home
+adb shell input keyevent KEYCODE_HOME
+WITHIN=10 within "the app never went to the back" stopped
+adb shell am start -n $APP/.MainActivity >/dev/null
+await "To sync: 1 changed, 1 new ▾" 10
+tap "To sync: 1 changed, 1 new ▾"
+await "ideas.md" 10
+shot pending
+tap "Sync"
+await "No changes on this phone to sync"
+shot pending-none
+laptop pull -q
 
 echo "== Both change the same line"
 phone_writes welcome.md '# Welcome\n\nThese notes sync with SafeGit.\n\nToday: phone wants to read.\n'

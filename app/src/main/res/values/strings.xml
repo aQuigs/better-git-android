@@ -19,6 +19,27 @@
     <string name="step_merge">Combining both sides…</string>
     <string name="step_update_folder">Updating the folder…</string>
     <string name="step_push">Pushing…</string>
+    <string name="pending_none">No changes on this phone to sync</string>
+    <string name="pending_count">To sync: %1$s</string>
+    <plurals name="pending_changed">
+        <item quantity="one">%1$d changed</item>
+        <item quantity="other">%1$d changed</item>
+    </plurals>
+    <plurals name="pending_new">
+        <item quantity="one">%1$d new</item>
+        <item quantity="other">%1$d new</item>
+    </plurals>
+    <plurals name="pending_deleted">
+        <item quantity="one">%1$d deleted</item>
+        <item quantity="other">%1$d deleted</item>
+    </plurals>
+    <string name="pending_changed_file">changed</string>
+    <string name="pending_new_file">new</string>
+    <string name="pending_deleted_file">deleted</string>
+    <plurals name="pending_more">
+        <item quantity="one">and %1$d more file</item>
+        <item quantity="other">and %1$d more files</item>
+    </plurals>
     <string name="state_up_to_date">Up to date</string>
     <string name="state_synced">Synced</string>
     <string name="state_conflict">Both sides changed the same lines. Each of these files now holds both versions, between lines starting with &lt;&lt;&lt;&lt;&lt;&lt;&lt; and &gt;&gt;&gt;&gt;&gt;&gt;&gt;. Edit them to keep what you want, then sync. Nothing is pushed until then.</string>

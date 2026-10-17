@@ -11,6 +11,7 @@ import com.sqftware.safegit.repos.AutoSync
 import com.sqftware.safegit.repos.SavedRepo
 import com.sqftware.safegit.sync.Choice
 import com.sqftware.safegit.sync.Keep
+import com.sqftware.safegit.sync.Pending
 import com.sqftware.safegit.sync.Problem
 import com.sqftware.safegit.sync.Step
 import com.sqftware.safegit.sync.SyncResult
@@ -160,6 +161,28 @@ class ReposScreenTest {
         compose.onNodeWithText("Sync with these choices").performClick()
 
         assertEquals(listOf(mapOf(photo to Keep.LOCAL, deleted to Keep.REMOTE)), synced)
+    }
+
+    @Test
+    fun countsWhatTheNextSyncPushesAndOpensIntoTheFiles() {
+        val pending = Pending(changed = listOf("ideas.md", "daily/today.md"), added = listOf("new.md"), deleted = emptyList())
+        compose.setContent { ReposScreen(listOf(RepoRow(vault, null, pending = pending)), onSync = { _, _ -> }, onAdd = {}) }
+
+        compose.onNodeWithText("new.md").assertDoesNotExist()
+        compose.onNodeWithText("To sync: 2 changed, 1 new ▾").performClick()
+
+        compose.onNodeWithText("To sync: 2 changed, 1 new ▴").assertExists()
+        compose.onNodeWithText("daily/today.md").assertExists()
+        compose.onNodeWithText("new.md").assertExists()
+        compose.onNodeWithText("deleted").assertDoesNotExist()
+    }
+
+    @Test
+    fun saysWhenThereIsNothingToPush() {
+        val nothing = Pending(emptyList(), emptyList(), emptyList())
+        compose.setContent { ReposScreen(listOf(RepoRow(vault, null, pending = nothing)), onSync = { _, _ -> }, onAdd = {}) }
+
+        compose.onNodeWithText("No changes on this phone to sync").assertExists()
     }
 
     @Test

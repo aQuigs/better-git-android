@@ -68,6 +68,18 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    // What each repo would push is read as the app comes to the front, rather than watched
+    override fun onStart() {
+        super.onStart()
+        Services.of(this).outgoing.show()
+    }
+
+    // A rotation is no trip to the back, and need not read every repo again
+    override fun onStop() {
+        super.onStop()
+        if (!isChangingConfigurations) Services.of(this).outgoing.hide()
+    }
+
     // The user grants all-files access in Settings and comes back here
     override fun onResume() {
         super.onResume()
@@ -111,11 +123,12 @@ private fun Repos(services: Services, onAdd: () -> Unit, onAbout: () -> Unit) {
     val repos by services.repos.all.collectAsState(null)
     val states by services.syncer.states.collectAsState(emptyMap())
     val account by services.signIn.state.collectAsState()
+    val pending by services.outgoing.pending.collectAsState()
     val context = LocalContext.current
     // Automatic syncs run without it too; it only lets them say when they need the user
     val notifications = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {}
     ReposScreen(
-        rows = repos?.map { RepoRow(it, states[it.id], services.signIn.canSignInAgain(it.url, account)) } ?: return,
+        rows = repos?.map { RepoRow(it, states[it.id], services.signIn.canSignInAgain(it.url, account), pending[it.id]) } ?: return,
         onSync = services.syncer::sync,
         onAdd = onAdd,
         onSignIn = services.signIn::signInAgain,
