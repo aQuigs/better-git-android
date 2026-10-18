@@ -16,6 +16,7 @@ import com.sqftware.safegit.repos.RepoStore
 import com.sqftware.safegit.repos.SavedRepo
 import com.sqftware.safegit.sync.Cancellation
 import com.sqftware.safegit.sync.Choice
+import com.sqftware.safegit.sync.CommitTemplate
 import com.sqftware.safegit.sync.Keep
 import com.sqftware.safegit.sync.Problem
 import com.sqftware.safegit.sync.RecentEdits
@@ -54,7 +55,7 @@ sealed interface SyncState {
 /** A sync of every repo at once: the repos it queued, in order, and each one's result once it has one. */
 data class AllRun(val ids: List<String>, val results: Map<String, SyncResult> = emptyMap(), val going: Boolean = false)
 
-/** Starts syncs and reports how they stand. */
+/** Starts syncs, reports how they stand, and saves how each repo syncs. */
 interface Syncer {
     /** Each repo's sync state by id; a repo never synced has none. */
     val states: Flow<Map<String, SyncState>>
@@ -77,6 +78,9 @@ interface Syncer {
 
     /** Saves how often [repo] syncs on its own, and schedules it so. */
     fun setAuto(repo: SavedRepo, auto: AutoSync)
+
+    /** Saves the [CommitTemplate] that [repo]'s syncs write their commit messages from. */
+    fun setMessage(repo: SavedRepo, message: String)
 }
 
 /**
@@ -163,6 +167,10 @@ class WorkSyncer(
         }
     }
 
+    override fun setMessage(repo: SavedRepo, message: String) {
+        scope.launch(Dispatchers.IO) { repos.save(repo.copy(message = message)) }
+    }
+
     private val WorkInfo.repoId get() = tags.firstOrNull { it.startsWith(REPO_TAG) }?.removePrefix(REPO_TAG)
 
     private companion object {
@@ -226,7 +234,7 @@ class SyncWorker(context: Context, params: WorkerParameters) : CoroutineWorker(c
                 if (automatic && AutoRuns.putOff(RecentEdits(services.git).latest(repo), System.currentTimeMillis())) return null
                 // The user's choices wait for the sync they start; an automatic one leaves conflicts to it too
                 if (!automatic) choices = services.records.takeChoices(saved.id)
-                SafeSync(services.git, services.signIn.identity(services.device), services.device)
+                SafeSync(services.git, services.signIn.identity(services.device), services.device, message = CommitTemplate(saved.message))
                     .sync(repo, services.signIn.credentials(), choices, attended = !automatic, cancellation) { services.running.step(saved.id, it) }
             } catch (e: Exception) {
                 // Shown like any other failure rather than leaving the last result up as if nothing had happened

@@ -142,6 +142,8 @@ private fun Repos(services: Services, onAdd: () -> Unit, onAbout: () -> Unit) {
             if (auto != AutoSync.OFF && !granted) notifications.launch(Manifest.permission.POST_NOTIFICATIONS)
             services.syncer.setAuto(repo, auto)
         },
+        onMessage = services.syncer::setMessage,
+        device = services.device,
         onAbout = onAbout,
         all = all,
         onSyncAll = services.syncer::syncAll,

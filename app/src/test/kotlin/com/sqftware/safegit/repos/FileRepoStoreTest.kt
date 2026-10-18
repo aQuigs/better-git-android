@@ -1,5 +1,6 @@
 package com.sqftware.safegit.repos
 
+import com.sqftware.safegit.sync.CommitTemplate
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
@@ -36,10 +37,19 @@ class FileRepoStoreTest {
     }
 
     @Test
+    fun keepsEachCommitMessageTemplate() = runBlocking {
+        val notes = SavedRepo("a", "https://example.com/notes.git", File("/storage/emulated/0/Documents/Notes"), "main", message = "{files} notes from {device}")
+        store().save(notes)
+
+        assertEquals(listOf(notes), store().all.first())
+    }
+
+    @Test
     fun syncsOnlyWhenAskedARepoSavedBeforeAutomaticSyncs() = runBlocking {
         file.writeText("""[{"id":"a","url":"https://example.com/notes.git","folder":"/sdcard/Notes"}]""")
 
         assertEquals(AutoSync.OFF, FileRepoStore(file) { "main" }.all.first().single().auto)
+        assertEquals(CommitTemplate.DEFAULT_TEMPLATE, FileRepoStore(file) { "main" }.all.first().single().message)
     }
 
     @Test

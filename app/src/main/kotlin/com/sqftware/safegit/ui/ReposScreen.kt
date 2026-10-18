@@ -13,15 +13,19 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -35,6 +39,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.res.pluralStringResource
@@ -45,6 +50,8 @@ import com.sqftware.safegit.R
 import com.sqftware.safegit.repos.AutoSync
 import com.sqftware.safegit.repos.SavedRepo
 import com.sqftware.safegit.sync.Choice
+import com.sqftware.safegit.sync.CommitFacts
+import com.sqftware.safegit.sync.CommitTemplate
 import com.sqftware.safegit.sync.Keep
 import com.sqftware.safegit.sync.Pending
 import com.sqftware.safegit.sync.Problem
@@ -71,6 +78,8 @@ fun ReposScreen(
     onCancel: (SavedRepo) -> Unit = {},
     onSignIn: () -> Unit = {},
     onAuto: (SavedRepo, AutoSync) -> Unit = { _, _ -> },
+    onMessage: (SavedRepo, String) -> Unit = { _, _ -> },
+    device: String = "",
     onAbout: () -> Unit = {},
     all: AllRun? = null,
     onSyncAll: () -> Unit = {},
@@ -88,7 +97,7 @@ fun ReposScreen(
                 item { Text(stringResource(R.string.repos_empty), Modifier.padding(8.dp), style = MaterialTheme.typography.bodyLarge) }
             }
             items(rows, key = { it.repo.id }) { row ->
-                RepoCard(row, onSync = { choices -> onSync(row.repo, choices) }, onCancel = { onCancel(row.repo) }, onSignIn, onAuto = { onAuto(row.repo, it) })
+                RepoCard(row, onSync = { choices -> onSync(row.repo, choices) }, onCancel = { onCancel(row.repo) }, onSignIn, onAuto = { onAuto(row.repo, it) }, onMessage = { onMessage(row.repo, it) }, device)
             }
             item { TextButton(onClick = onAbout) { Text(stringResource(R.string.about_open)) } }
         }
@@ -96,10 +105,21 @@ fun ReposScreen(
 }
 
 @Composable
-private fun RepoCard(row: RepoRow, onSync: (Map<Choice, Keep>) -> Unit, onCancel: () -> Unit, onSignIn: () -> Unit, onAuto: (AutoSync) -> Unit) {
+private fun RepoCard(
+    row: RepoRow,
+    onSync: (Map<Choice, Keep>) -> Unit,
+    onCancel: () -> Unit,
+    onSignIn: () -> Unit,
+    onAuto: (AutoSync) -> Unit,
+    onMessage: (String) -> Unit,
+    device: String,
+) {
     Card(Modifier.fillMaxWidth().padding(bottom = 12.dp)) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            RepoTitle(row.repo)
+            Row {
+                Box(Modifier.weight(1f)) { RepoTitle(row.repo) }
+                RepoMenu(row.repo.message, onMessage, device)
+            }
             // Here rather than with the choices, so picks made outlast a sync that runs meanwhile, such as an automatic one
             val kept = remember(row.repo.id) { mutableStateMapOf<Choice, Keep>() }
 
@@ -186,6 +206,61 @@ private fun PendingFiles(pending: Pending) {
 private class Kind(@PluralsRes val count: Int, @StringRes val label: Int, val paths: List<String>)
 
 private const val MAX_FILES = 100
+private const val EXAMPLE_FILES = 3
+
+/**
+ * The repo's settings that are seldom changed, kept off the card: for now its commit message template, edited with an
+ * example of what it writes on [device].
+ */
+@Composable
+private fun RepoMenu(message: String, onMessage: (String) -> Unit, device: String) {
+    var open by remember { mutableStateOf(false) }
+    var draft by rememberSaveable { mutableStateOf<String?>(null) }
+    Box {
+        IconButton(onClick = { open = true }) {
+            Icon(painterResource(R.drawable.ic_more_vert), contentDescription = stringResource(R.string.repo_menu))
+        }
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            DropdownMenuItem(
+                text = { Text(stringResource(R.string.commit_message)) },
+                onClick = {
+                    open = false
+                    draft = message
+                },
+            )
+        }
+    }
+
+    val editing = draft ?: return
+    AlertDialog(
+        onDismissRequest = { draft = null },
+        title = { Text(stringResource(R.string.commit_message)) },
+        text = {
+            OutlinedTextField(
+                editing,
+                onValueChange = { draft = it },
+                Modifier.fillMaxWidth(),
+                label = { Text(stringResource(R.string.commit_message_label)) },
+                singleLine = true,
+                supportingText = {
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        val example = CommitTemplate(editing).write(CommitFacts(device, System.currentTimeMillis()) { EXAMPLE_FILES })
+                        Text(stringResource(R.string.commit_message_example, example))
+                        Text(stringResource(R.string.commit_message_help))
+                    }
+                },
+            )
+        },
+        confirmButton = {
+            TextButton(onClick = {
+                draft = null
+                val saved = editing.trim().ifEmpty { CommitTemplate.DEFAULT_TEMPLATE }
+                if (saved != message) onMessage(saved)
+            }) { Text(stringResource(R.string.save)) }
+        },
+        dismissButton = { TextButton(onClick = { draft = null }) { Text(stringResource(R.string.cancel)) } },
+    )
+}
 
 @Composable
 private fun AutoSyncPicker(auto: AutoSync, onPick: (AutoSync) -> Unit) {

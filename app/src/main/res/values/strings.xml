@@ -77,6 +77,13 @@
     <string name="auto_daily">Every day</string>
     <string name="auto_weekly">Every week</string>
 
+    <string name="repo_menu">More options</string>
+    <string name="commit_message">Commit message template</string>
+    <string name="commit_message_label">Template</string>
+    <string name="commit_message_example">Example: %1$s</string>
+    <string name="commit_message_help">{device}, {date} and {files} fill in this phone\'s name, the day and the number of files changed. Leave it empty for the default.</string>
+    <string name="save">Save</string>
+
     <string name="notice_channel">Syncs that need you</string>
     <string name="notice_conflict">Some files hold both versions between markers. Edit them to keep what you want, then sync.</string>
     <string name="notice_conflict_ahead">This phone and the remote changed the same lines. Open SafeGit and sync to see both versions.</string>

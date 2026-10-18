@@ -14,6 +14,7 @@ import java.io.IOException
 import java.net.InetAddress
 import java.net.ServerSocket
 import java.net.Socket
+import java.time.ZoneOffset
 import java.util.concurrent.CopyOnWriteArrayList
 import kotlin.concurrent.thread
 import kotlin.time.Duration.Companion.days
@@ -122,6 +123,29 @@ abstract class SafeSyncContract(tempParent: File? = null, workTreeParent: File? 
         assertEquals("phone line\none\ntwo\nthree\nlaptop line\n", laptop.read("notes.md"))
         assertEquals("from the phone", laptop.read("phone.md"))
         assertEquals(listOf("Changes from Pixel", "laptop work", "first notes"), git.ok(laptop, "log", "--format=%s").lines())
+    }
+
+    @Test
+    fun writesEachCommitMessageFromTheTemplate() {
+        val template = CommitTemplate("{device} on {date}: {files} files", ZoneOffset.UTC)
+        files.resolve("notes.md").renameTo(files.resolve("renamed.md"))
+        files.write("new.md", "new")
+
+        sync(message = template, now = DAY)
+
+        laptopPull()
+        assertEquals("Pixel on 1970-01-02: 2 files", git.ok(laptop, "log", "-1", "--format=%B"))
+
+        laptop.write("laptop.md", "laptop work")
+        laptop.commitAndPush("laptop work")
+        files.write("new.md", "newer")
+        files.write("other.md", "other")
+        files.write("third.md", "third")
+
+        sync(message = template, now = 3 * DAY)
+
+        laptopPull()
+        assertEquals("Pixel on 1970-01-04: 3 files", git.ok(laptop, "log", "-1", "--format=%B"))
     }
 
     @Test
@@ -1552,7 +1576,8 @@ abstract class SafeSyncContract(tempParent: File? = null, workTreeParent: File? 
         step: (Step) -> Unit = {},
         now: Long = 1000,
         cancellation: Cancellation = Cancellation(),
-    ) = SafeSync(git, PHONE, device = "Pixel", now = { now }).sync(repo, choices = choices, attended = attended, cancellation = cancellation, step = step)
+        message: CommitMessage = CommitTemplate.DEFAULT,
+    ) = SafeSync(git, PHONE, device = "Pixel", now = { now }, message).sync(repo, choices = choices, attended = attended, cancellation = cancellation, step = step)
 
     /** Syncs local work onto new remote work, so the sync replaces the local commit and backs it up. */
     private fun syncReplacingLocalCommits(now: Long) {

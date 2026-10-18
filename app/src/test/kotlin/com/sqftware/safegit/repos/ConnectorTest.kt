@@ -49,6 +49,8 @@ class ConnectorTest {
         override fun cancelAll() = Unit
 
         override fun closeAll() = Unit
+
+        override fun setMessage(repo: SavedRepo, message: String) = Unit
     }
     private lateinit var remote: File
     private lateinit var folder: File
