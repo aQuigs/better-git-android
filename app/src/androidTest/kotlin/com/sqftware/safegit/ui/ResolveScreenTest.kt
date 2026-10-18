@@ -105,7 +105,7 @@ class ResolveScreenTest {
     fun saysWhenMarkersAreLeftThatItCannotResolve() {
         show(MarkedFile("ideas.md", listOf(Part.Same("<<<<<<< Pixel\nhalf\n")), stray = true, ByteArray(0)))
 
-        compose.waitUntil { compose.onAllNodesWithText("Edit the file in another app", substring = true).fetchSemanticsNodes().isNotEmpty() }
+        compose.waitUntil { compose.onAllNodesWithText("Edit them in another app", substring = true).fetchSemanticsNodes().isNotEmpty() }
     }
 
     @Test
@@ -127,7 +127,7 @@ class ResolveScreenTest {
     fun saysWhenNoConflictIsLeft() {
         show(MarkedFile("ideas.md", listOf(Part.Same("done\n")), stray = false, ByteArray(0)))
 
-        compose.waitUntil { compose.onAllNodesWithText("No conflicts are left in this file. Sync to push it.").fetchSemanticsNodes().isNotEmpty() }
+        compose.waitUntil { compose.onAllNodesWithText("No conflicts left").fetchSemanticsNodes().isNotEmpty() }
     }
 
     @Test

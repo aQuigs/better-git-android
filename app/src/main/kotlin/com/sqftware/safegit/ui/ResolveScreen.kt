@@ -143,7 +143,6 @@ private fun Blocks(file: MarkedFile, picks: MutableMap<BlockKey, Pick>, save: (M
     val scope = rememberCoroutineScope()
 
     Column(Modifier.fillMaxSize()) {
-        Text(stringResource(R.string.resolve_explain), style = MaterialTheme.typography.bodyMedium)
         if (file.stray) Text(stringResource(R.string.resolve_stray), style = MaterialTheme.typography.bodyMedium)
         LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             val blocks = file.blocks
