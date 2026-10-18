@@ -124,7 +124,8 @@ class SafeSync(
      * Calls [step] as it starts each step, on the thread running the sync. A sync the user did not start, not
      * [attended], leaves conflicts to one they do: a new one ends it as [SyncResult.ConflictAhead] before the folder
      * moves, so markers never appear in a note the user has open, and a held one is never taken as resolved. Once
-     * [cancellation] says so, the sync ends [SyncResult.Cancelled].
+     * [cancellation] says so, the sync ends [SyncResult.Cancelled]. [transferred] hears what the sync moved, however it
+     * ends, just before it returns.
      */
     fun sync(
         repo: Repo,
@@ -132,12 +133,16 @@ class SafeSync(
         choices: Map<Choice, Keep> = emptyMap(),
         attended: Boolean = true,
         cancellation: Cancellation = Cancellation(),
+        transferred: (Transfer) -> Unit = {},
         step: (Step) -> Unit = {},
     ): SyncResult {
+        val tally = Tally()
         val (result, problems) = try {
-            cancellation.running { nested(repo, credentials, choices, step, attended, cancellation, fetched = false) }
+            cancellation.running { nested(repo, credentials, choices, step, attended, cancellation, fetched = false, tally) }
         } catch (_: InterruptedException) {
             return SyncResult.Cancelled
+        } finally {
+            transferred(Transfer(tally.pulled, tally.pushed))
         }
         // The user should hear about a submodule left behind even though the rest synced
         return if (problems.isEmpty() || (result != SyncResult.UpToDate && result !is SyncResult.Synced)) result
@@ -153,8 +158,9 @@ class SafeSync(
         attended: Boolean,
         cancellation: Cancellation,
         fetched: Boolean,
+        tally: Tally = Tally(),
     ): NestedSync {
-        val session = Session(RepoGit(git, repo, identity, cancellation), credentials, choices, step, attended, fetched)
+        val session = Session(RepoGit(git, repo, identity, cancellation), credentials, choices, step, attended, fetched, tally)
         val result = try {
             session.sync()
         } catch (e: GitFailure) {
@@ -173,6 +179,7 @@ class SafeSync(
         private val step: (Step) -> Unit,
         private val attended: Boolean,
         private var fetched: Boolean,
+        private val tally: Tally,
     ) {
         private val folder = FolderUpdate(git)
         private val markers = Markers(device)
@@ -237,7 +244,8 @@ class SafeSync(
                     submodules.beforeMove(head, target)?.let { return it }
                     step(Step.UPDATE_FOLDER)
                     when (val moved = folder.move(from = head ?: git.emptyTree, to = target)) {
-                        FolderUpdate.Result.Done -> {
+                        is FolderUpdate.Result.Done -> {
+                            tally.pulled = tally.pulled.then(moved.changes)
                             submodules.bringUp(onlyMoved = true)?.let { return it }
                             if (combined is Combined.Marked) return SyncResult.Conflict(combined.paths)
                             pulled += behind
@@ -260,8 +268,11 @@ class SafeSync(
                 }
 
                 step(Step.PUSH)
+                // Read before the push, as git that fails or is cancelled once it has pushed would end the sync wrongly
+                val giving = git.changes(upstreamHead ?: git.emptyTree, "HEAD")
                 val push = git.run("push", "--porcelain", remote, "HEAD:$merge", environment = credentials.environment())
                 if (push.ok) {
+                    tally.pushed = giving
                     return SyncResult.Synced(pulled, pushed = pushing)
                 }
                 if ("[rejected]" !in push.stdout) {
@@ -410,6 +421,12 @@ class SafeSync(
             if (merged.exitCode !in 0..MAX_CONFLICTS) throw GitFailure("merge-file", merged)
             return merged.stdout.trim()
         }
+    }
+
+    /** What a sync has moved so far: each attempt's pull adds up, and only the push that took counts. */
+    private class Tally {
+        var pulled = FileChanges.NONE
+        var pushed = FileChanges.NONE
     }
 
     private sealed interface Combined {

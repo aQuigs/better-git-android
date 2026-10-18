@@ -51,7 +51,7 @@ class PendingChangesTest {
         write("new folder/new.md", "new\n")
         phone.workTree.resolve("old.md").delete()
 
-        assertEquals(Pending(changed = listOf("notes.md"), added = listOf("new folder/new.md"), deleted = listOf("old.md")), pending.of(phone))
+        assertEquals(FileChanges(changed = listOf("notes.md"), added = listOf("new folder/new.md"), deleted = listOf("old.md")), pending.of(phone))
     }
 
     @Test
@@ -65,7 +65,7 @@ class PendingChangesTest {
         assertTrue(sync() is SyncResult.Failed)
         write("later.md", "later\n")
 
-        assertEquals(Pending(changed = listOf("notes.md"), added = listOf("later.md", "new.md"), deleted = emptyList()), pending.of(phone))
+        assertEquals(FileChanges(changed = listOf("notes.md"), added = listOf("later.md", "new.md"), deleted = emptyList()), pending.of(phone))
     }
 
     @Test
@@ -80,7 +80,7 @@ class PendingChangesTest {
 
         write("phone.md", "phone\n")
 
-        assertEquals(Pending(changed = emptyList(), added = listOf("phone.md"), deleted = emptyList()), pending.of(phone))
+        assertEquals(FileChanges(changed = emptyList(), added = listOf("phone.md"), deleted = emptyList()), pending.of(phone))
     }
 
     @Test
@@ -104,7 +104,7 @@ class PendingChangesTest {
         phoneGit("add", "--all")
         phoneGit("commit", "-q", "-m", "first")
 
-        assertEquals(Pending(changed = emptyList(), added = listOf("notes.md"), deleted = emptyList()), pending.of(phone))
+        assertEquals(FileChanges(changed = emptyList(), added = listOf("notes.md"), deleted = emptyList()), pending.of(phone))
     }
 
     @Test
@@ -158,7 +158,7 @@ class PendingChangesTest {
 
         write("lib/lib.md", "library, edited on the phone\n")
 
-        assertEquals(Pending(changed = listOf("lib"), added = emptyList(), deleted = emptyList()), pending.of(phone))
+        assertEquals(FileChanges(changed = listOf("lib"), added = emptyList(), deleted = emptyList()), pending.of(phone))
     }
 
     @Test
@@ -174,7 +174,7 @@ class PendingChangesTest {
         write("notes.md", "two\n")
         phone.workTree.resolve("notes.md").setLastModified(second)
 
-        assertEquals(Pending(changed = listOf("notes.md"), added = emptyList(), deleted = emptyList()), pending.of(phone))
+        assertEquals(FileChanges(changed = listOf("notes.md"), added = emptyList(), deleted = emptyList()), pending.of(phone))
     }
 
     @Test

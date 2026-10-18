@@ -1,6 +1,7 @@
 package com.sqftware.safegit.storage
 
 import org.json.JSONArray
+import org.json.JSONException
 import org.json.JSONObject
 import java.io.File
 import java.io.FileOutputStream
@@ -21,3 +22,12 @@ fun JSONArray.objects(): List<JSONObject> = (0 until length()).map(::getJSONObje
 fun JSONArray.strings(): List<String> = (0 until length()).map(::getString)
 
 fun JSONObject.stringOrNull(key: String): String? = if (isNull(key)) null else getString(key)
+
+/** What [parse] reads, or null when this version cannot read it, as after a downgrade. */
+fun <T> readableOrNull(parse: () -> T): T? = try {
+    parse()
+} catch (_: JSONException) {
+    null
+} catch (_: IllegalArgumentException) {
+    null
+}

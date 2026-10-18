@@ -2,11 +2,6 @@ package com.sqftware.safegit.sync
 
 import com.sqftware.safegit.git.Git
 
-/** The files a sync would push, by path. */
-data class Pending(val changed: List<String>, val added: List<String>, val deleted: List<String>) {
-    fun isEmpty() = changed.isEmpty() && added.isEmpty() && deleted.isEmpty()
-}
-
 /**
  * What the next sync would push: the folder against where the branch's own changes start, as SafeSync finds it from the
  * remote as last fetched, so commits a sync made but could not push count too. A submodule with work of its own shows
@@ -17,7 +12,7 @@ class PendingChanges(private val git: Git) {
      * Null when nothing can be said yet: before the branch's first commit, off a branch or its upstream, or while it
      * shares no history with the remote, which the first sync's merge sorts out file by file.
      */
-    fun of(repo: Repo): Pending? {
+    fun of(repo: Repo): FileChanges? {
         val git = RepoGit(git, repo, NOBODY)
         if (git.head() == null) return null
         val upstream = git.branch()?.let(git::upstream) ?: return null
@@ -37,7 +32,7 @@ class PendingChanges(private val git: Git) {
         // A file the index no longer has but the folder does reads as deleted and untracked both
         val statuses = tracked + untracked.associateWith { if (tracked[it] == DELETED) MODIFIED else ADDED }
         fun with(vararg status: String) = statuses.filterValues { it in status }.keys.sorted()
-        return Pending(changed = with(MODIFIED, TYPE_CHANGED), added = with(ADDED), deleted = with(DELETED))
+        return FileChanges(changed = with(MODIFIED, TYPE_CHANGED), added = with(ADDED), deleted = with(DELETED))
     }
 
     /** Runs [read] on a copy of the index: diff refreshes the index it reads, optional locks or not, and that write is a sync's alone. */

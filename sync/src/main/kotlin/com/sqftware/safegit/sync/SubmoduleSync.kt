@@ -276,7 +276,7 @@ internal class SubmoduleSync(
 
     private fun move(sub: RepoGit, from: String?, to: String) {
         when (val moved = FolderUpdate(sub).move(from = from ?: sub.emptyTree, to = to)) {
-            FolderUpdate.Result.Done -> Unit
+            is FolderUpdate.Result.Done -> Unit
             is FolderUpdate.Result.Blocked -> throw Skip("These files are in the way: ${moved.paths.joinToString(", ")}")
             is FolderUpdate.Result.WriteFailed -> throw Skip(moved.detail)
         }

@@ -579,6 +579,52 @@ abstract class SafeSyncContract(tempParent: File? = null, workTreeParent: File? 
     }
 
     @Test
+    fun saysWhichFilesItPulledAndPushed() {
+        laptop.write("laptop.md", "from the laptop")
+        laptop.write("notes.md", "one\ntwo\nthree\nlaptop line\n")
+        laptop.commitAndPush("laptop work")
+        files.write("phone.md", "from the phone")
+        files.write("folder/deep.md", "nested")
+
+        val transfer = transferOf { sync(transferred = it) }
+
+        assertEquals(FileChanges(changed = listOf("notes.md"), added = listOf("laptop.md"), deleted = emptyList()), transfer.pulled)
+        assertEquals(FileChanges(changed = emptyList(), added = listOf("folder/deep.md", "phone.md"), deleted = emptyList()), transfer.pushed)
+
+        files.resolve("phone.md").delete()
+        assertEquals(Transfer(pushed = FileChanges(emptyList(), emptyList(), deleted = listOf("phone.md"))), transferOf { sync(transferred = it) })
+        assertEquals(Transfer(), transferOf { sync(transferred = it) })
+    }
+
+    @Test
+    fun addsUpWhatEachAttemptPulled() {
+        laptop.write("laptop.md", "from the laptop")
+        laptop.commitAndPush("laptop work")
+        files.write("phone.md", "from the phone")
+        val laptopTakesItBackFirst = git.beforeFirst({ "push" in it }) {
+            git.ok(laptop, "rm", "-q", "laptop.md")
+            laptop.write("other.md", "after all")
+            laptop.commitAndPush("laptop changes its mind")
+        }
+
+        val transfer = transferOf { sync(laptopTakesItBackFirst, transferred = it) }
+
+        assertEquals(FileChanges(emptyList(), added = listOf("other.md"), deleted = emptyList()), transfer.pulled)
+        assertEquals(FileChanges(emptyList(), added = listOf("phone.md"), deleted = emptyList()), transfer.pushed)
+    }
+
+    @Test
+    fun aConflictPullsTheMarkedFileAndPushesNothing() {
+        conflictInNotes()
+        laptop.write("laptop.md", "from the laptop")
+        laptop.commitAndPush("more laptop work")
+
+        val transfer = transferOf { sync(transferred = it) }
+
+        assertEquals(Transfer(pulled = FileChanges(changed = listOf("notes.md"), added = listOf("laptop.md"), deleted = emptyList())), transfer)
+    }
+
+    @Test
     fun aCancelStopsAFetchThatHangsAndTheNextSyncPushesTheWork() {
         files.write("phone.md", "from the phone")
         val cancellation = Cancellation()
@@ -1577,7 +1623,15 @@ abstract class SafeSyncContract(tempParent: File? = null, workTreeParent: File? 
         now: Long = 1000,
         cancellation: Cancellation = Cancellation(),
         message: CommitMessage = CommitTemplate.DEFAULT,
-    ) = SafeSync(git, PHONE, device = "Pixel", now = { now }, message).sync(repo, choices = choices, attended = attended, cancellation = cancellation, step = step)
+        transferred: (Transfer) -> Unit = {},
+    ) = SafeSync(git, PHONE, device = "Pixel", now = { now }, message)
+        .sync(repo, choices = choices, attended = attended, cancellation = cancellation, transferred = transferred, step = step)
+
+    private fun transferOf(sync: ((Transfer) -> Unit) -> SyncResult): Transfer {
+        val heard = mutableListOf<Transfer>()
+        sync(heard::add)
+        return heard.single()
+    }
 
     /** Syncs local work onto new remote work, so the sync replaces the local commit and backs it up. */
     private fun syncReplacingLocalCommits(now: Long) {

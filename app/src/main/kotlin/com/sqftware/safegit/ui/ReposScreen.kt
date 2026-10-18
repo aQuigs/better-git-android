@@ -1,7 +1,5 @@
 package com.sqftware.safegit.ui
 
-import androidx.annotation.PluralsRes
-import androidx.annotation.StringRes
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -44,7 +42,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
@@ -56,7 +53,7 @@ import com.sqftware.safegit.sync.ChoicePreview
 import com.sqftware.safegit.sync.CommitFacts
 import com.sqftware.safegit.sync.CommitTemplate
 import com.sqftware.safegit.sync.Keep
-import com.sqftware.safegit.sync.Pending
+import com.sqftware.safegit.sync.FileChanges
 import com.sqftware.safegit.sync.Problem
 import com.sqftware.safegit.sync.Step
 import com.sqftware.safegit.sync.SyncResult
@@ -68,7 +65,7 @@ import kotlinx.coroutines.withContext
  * A connected repo as the list shows it; [canSignIn] when a new sign-in could help its remote, and none is under way.
  * [pending] is what its next sync would push, when known.
  */
-data class RepoRow(val repo: SavedRepo, val state: SyncState?, val canSignIn: Boolean = false, val pending: Pending? = null)
+data class RepoRow(val repo: SavedRepo, val state: SyncState?, val canSignIn: Boolean = false, val pending: FileChanges? = null)
 
 /**
  * The connected repos, under [header], such as the account syncs run as; [onSignIn] replaces a sign-in a remote refused.
@@ -85,6 +82,7 @@ fun ReposScreen(
     onAuto: (SavedRepo, AutoSync) -> Unit = { _, _ -> },
     onMessage: (SavedRepo, String) -> Unit = { _, _ -> },
     device: String = "",
+    onHistory: (SavedRepo) -> Unit = {},
     onAbout: () -> Unit = {},
     all: AllRun? = null,
     onSyncAll: () -> Unit = {},
@@ -112,6 +110,7 @@ fun ReposScreen(
                     onMessage = { onMessage(row.repo, it) },
                     device,
                     preview = { preview(row.repo, it) },
+                    onHistory = { onHistory(row.repo) },
                 )
             }
             item { TextButton(onClick = onAbout) { Text(stringResource(R.string.about_open)) } }
@@ -129,12 +128,13 @@ private fun RepoCard(
     onMessage: (String) -> Unit,
     device: String,
     preview: (Choice) -> ChoicePreview?,
+    onHistory: () -> Unit,
 ) {
     Card(Modifier.fillMaxWidth().padding(bottom = 12.dp)) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Row {
                 Box(Modifier.weight(1f)) { RepoTitle(row.repo) }
-                RepoMenu(row.repo.message, onMessage, device)
+                RepoMenu(row.repo.message, onMessage, device, onHistory)
             }
             // Here rather than with the choices, so picks made outlast a sync that runs meanwhile, such as an automatic one
             val kept = remember(row.repo.id) { mutableStateMapOf<Choice, Keep>() }
@@ -183,53 +183,30 @@ private fun RepoTitle(repo: SavedRepo) {
 
 /** A count of the files the next sync would push, which opens into the files themselves. */
 @Composable
-private fun PendingFiles(pending: Pending) {
+private fun PendingFiles(pending: FileChanges) {
     if (pending.isEmpty()) {
         Text(stringResource(R.string.pending_none), style = MaterialTheme.typography.bodyMedium)
         return
     }
 
     var open by rememberSaveable { mutableStateOf(false) }
-    val kinds = listOf(
-        Kind(R.plurals.pending_changed, R.string.pending_changed_file, pending.changed),
-        Kind(R.plurals.pending_new, R.string.pending_new_file, pending.added),
-        Kind(R.plurals.pending_deleted, R.string.pending_deleted_file, pending.deleted),
-    ).filter { it.paths.isNotEmpty() }
-    val counts = kinds.map { pluralStringResource(it.count, it.paths.size, it.paths.size) }.joinToString(", ")
     Text(
-        stringResource(R.string.pending_count, counts) + if (open) " ▴" else " ▾",
+        stringResource(R.string.pending_count, fileCounts(pending)) + if (open) " ▴" else " ▾",
         Modifier.clickable { open = !open },
         color = MaterialTheme.colorScheme.primary,
         style = MaterialTheme.typography.bodyMedium,
     )
-    if (!open) return
-
-    // A first sync of a whole vault can hold thousands of files, too many to lay out in a card
-    val files = kinds.asSequence().flatMap { kind -> kind.paths.asSequence().map { it to kind.label } }.take(MAX_FILES).toList()
-    Column {
-        for ((path, label) in files) {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text(path, Modifier.weight(1f), fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodyMedium)
-                Text(stringResource(label), style = MaterialTheme.typography.bodySmall)
-            }
-        }
-        val more = kinds.sumOf { it.paths.size } - files.size
-        if (more > 0) Text(pluralStringResource(R.plurals.pending_more, more, more), style = MaterialTheme.typography.bodySmall)
-    }
+    if (open) FileList(pending)
 }
 
-/** One kind of change: the [count] line's part, and the [label] beside each of its [paths]. */
-private class Kind(@PluralsRes val count: Int, @StringRes val label: Int, val paths: List<String>)
-
-private const val MAX_FILES = 100
 private const val EXAMPLE_FILES = 3
 
 /**
- * The repo's settings that are seldom changed, kept off the card: for now its commit message template, edited with an
- * example of what it writes on [device].
+ * What the repo offers beyond syncing, kept off the card: its history, and its seldom changed settings, for now its
+ * commit message template, edited with an example of what it writes on [device].
  */
 @Composable
-private fun RepoMenu(message: String, onMessage: (String) -> Unit, device: String) {
+private fun RepoMenu(message: String, onMessage: (String) -> Unit, device: String, onHistory: () -> Unit) {
     var open by remember { mutableStateOf(false) }
     var draft by rememberSaveable { mutableStateOf<String?>(null) }
     Box {
@@ -237,6 +214,13 @@ private fun RepoMenu(message: String, onMessage: (String) -> Unit, device: Strin
             Icon(painterResource(R.drawable.ic_more_vert), contentDescription = stringResource(R.string.repo_menu))
         }
         DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            DropdownMenuItem(
+                text = { Text(stringResource(R.string.history_open)) },
+                onClick = {
+                    open = false
+                    onHistory()
+                },
+            )
             DropdownMenuItem(
                 text = { Text(stringResource(R.string.commit_message)) },
                 onClick = {
@@ -332,9 +316,7 @@ private fun Outcome(
 @Composable
 private fun Paths(explanation: String, paths: List<String>) {
     Text(explanation)
-    Column {
-        for (path in paths) Text(path, fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodyMedium)
-    }
+    PathList(paths)
 }
 
 /** Asks for a [Keep] for each choice, showing what each side holds, and syncs with them once every one has one. */

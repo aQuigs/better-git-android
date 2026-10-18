@@ -39,6 +39,7 @@ import com.sqftware.safegit.auth.DeviceCode
 import com.sqftware.safegit.repos.AutoSync
 import com.sqftware.safegit.repos.Connector
 import com.sqftware.safegit.repos.RemoteBranches
+import com.sqftware.safegit.repos.SavedRepo
 import com.sqftware.safegit.storage.AllFilesAccess
 import com.sqftware.safegit.storage.StorageAccess
 import com.sqftware.safegit.storage.folderOf
@@ -46,6 +47,7 @@ import com.sqftware.safegit.ui.AboutScreen
 import com.sqftware.safegit.ui.AccessScreen
 import com.sqftware.safegit.ui.AccountCard
 import com.sqftware.safegit.ui.AddRepoScreen
+import com.sqftware.safegit.ui.HistoryScreen
 import com.sqftware.safegit.ui.RepoRow
 import com.sqftware.safegit.ui.ReposScreen
 import java.io.File
@@ -96,6 +98,7 @@ class MainActivity : ComponentActivity() {
 private fun App(services: Services) {
     var adding by rememberSaveable { mutableStateOf(false) }
     var about by rememberSaveable { mutableStateOf(false) }
+    var history by rememberSaveable { mutableStateOf<String?>(null) }
     val connecting by services.connector.state.collectAsState()
 
     // Also when the user left the add screen while it connected
@@ -106,10 +109,12 @@ private fun App(services: Services) {
         }
     }
 
+    val historyOf = history
     when {
         adding -> AddRepo(services, connecting, onDone = { adding = false })
         about -> About(services, onDone = { about = false })
-        else -> Repos(services, onAdd = { adding = true }, onAbout = { about = true })
+        historyOf != null -> History(services, historyOf, onDone = { history = null })
+        else -> Repos(services, onAdd = { adding = true }, onAbout = { about = true }, onHistory = { history = it.id })
     }
 }
 
@@ -139,7 +144,16 @@ private fun copy(context: Context, label: String, text: String) =
     context.getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText(label, text))
 
 @Composable
-private fun Repos(services: Services, onAdd: () -> Unit, onAbout: () -> Unit) {
+private fun History(services: Services, id: String, onDone: () -> Unit) {
+    val repos by services.repos.all.collectAsState(null)
+    val syncs by remember(id) { services.history.of(id) }.collectAsState(null)
+    BackHandler(onBack = onDone)
+
+    HistoryScreen(repos?.find { it.id == id }?.name.orEmpty(), syncs)
+}
+
+@Composable
+private fun Repos(services: Services, onAdd: () -> Unit, onAbout: () -> Unit, onHistory: (SavedRepo) -> Unit) {
     val repos by services.repos.all.collectAsState(null)
     val states by services.syncer.states.collectAsState(emptyMap())
     val all by services.syncer.all.collectAsState(null)
@@ -162,6 +176,7 @@ private fun Repos(services: Services, onAdd: () -> Unit, onAbout: () -> Unit) {
         },
         onMessage = services.syncer::setMessage,
         device = services.device,
+        onHistory = onHistory,
         onAbout = onAbout,
         all = all,
         onSyncAll = services.syncer::syncAll,

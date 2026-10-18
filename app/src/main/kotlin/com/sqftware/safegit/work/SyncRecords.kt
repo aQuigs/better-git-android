@@ -1,16 +1,14 @@
 package com.sqftware.safegit.work
 
 import com.sqftware.safegit.storage.objects
-import com.sqftware.safegit.storage.stringOrNull
+import com.sqftware.safegit.storage.readableOrNull
 import com.sqftware.safegit.storage.strings
 import com.sqftware.safegit.storage.writeAtomically
 import com.sqftware.safegit.sync.Choice
 import com.sqftware.safegit.sync.Keep
-import com.sqftware.safegit.sync.Problem
 import com.sqftware.safegit.sync.Step
 import com.sqftware.safegit.sync.SyncResult
 import org.json.JSONArray
-import org.json.JSONException
 import org.json.JSONObject
 import java.io.File
 
@@ -36,7 +34,7 @@ data class PastSync(
  */
 class SyncRecords(private val dir: File) {
     /** The last result, or null when there is none or this version cannot read it. */
-    fun result(id: String): SyncResult? = read(file(id, RESULT)) { decode(it) }
+    fun result(id: String): SyncResult? = read(file(id, RESULT), ::decodeResult)
 
     @Synchronized
     fun saveResult(id: String, result: SyncResult) = file(id, RESULT).writeAtomically(encode(result).toString())
@@ -79,7 +77,7 @@ class SyncRecords(private val dir: File) {
 
     private fun readAll(): Pair<String, AllRun>? = read(dir.resolve(ALL)) { json ->
         val results = json.getJSONObject("results")
-        json.getString("run") to AllRun(json.getJSONArray("ids").strings(), results.keys().asSequence().associateWith { decode(results.getJSONObject(it)) })
+        json.getString("run") to AllRun(json.getJSONArray("ids").strings(), results.keys().asSequence().associateWith { decodeResult(results.getJSONObject(it)) })
     }
 
     /** The last [HISTORY] syncs, newest first. */
@@ -94,13 +92,7 @@ class SyncRecords(private val dir: File) {
     /** What [file] holds, or null when there is none or this version cannot read it. */
     private fun <T> read(file: File, parse: (JSONObject) -> T): T? {
         if (!file.exists()) return null
-        return try {
-            parse(JSONObject(file.readText()))
-        } catch (_: JSONException) {
-            null
-        } catch (_: IllegalArgumentException) {
-            null
-        }
+        return readableOrNull { parse(JSONObject(file.readText())) }
     }
 
     private fun writeAll(run: String, all: AllRun) {
@@ -109,27 +101,6 @@ class SyncRecords(private val dir: File) {
     }
 
     private fun file(id: String, kind: String) = dir.resolve("$id.$kind.json")
-
-    private fun encode(result: SyncResult): JSONObject = when (result) {
-        SyncResult.UpToDate -> JSONObject().put("type", "upToDate")
-        is SyncResult.Synced -> JSONObject().put("type", "synced").put("pulled", result.pulled).put("pushed", result.pushed)
-        is SyncResult.Conflict -> JSONObject().put("type", "conflict").put("paths", JSONArray(result.paths))
-        is SyncResult.ConflictAhead -> JSONObject().put("type", "conflictAhead").put("paths", JSONArray(result.paths))
-        is SyncResult.Choose -> JSONObject().put("type", "choose").put("choices", JSONArray(result.choices.map(::encode)))
-        is SyncResult.Failed -> JSONObject().put("type", "failed").put("problem", result.problem.name).put("detail", result.detail)
-        SyncResult.Cancelled -> JSONObject().put("type", "cancelled")
-    }
-
-    private fun decode(json: JSONObject): SyncResult = when (val type = json.getString("type")) {
-        "upToDate" -> SyncResult.UpToDate
-        "synced" -> SyncResult.Synced(json.getInt("pulled"), json.getInt("pushed"))
-        "conflict" -> SyncResult.Conflict(json.getJSONArray("paths").strings())
-        "conflictAhead" -> SyncResult.ConflictAhead(json.getJSONArray("paths").strings())
-        "choose" -> SyncResult.Choose(json.getJSONArray("choices").objects().map(::decodeChoice))
-        "failed" -> SyncResult.Failed(Problem.valueOf(json.getString("problem")), json.getString("detail"))
-        "cancelled" -> SyncResult.Cancelled
-        else -> throw IllegalArgumentException("Unknown sync result $type")
-    }
 
     private fun encode(sync: PastSync) = JSONObject().put("repo", sync.repo).put("started", sync.started).put("automatic", sync.automatic)
         .put("steps", JSONArray(sync.steps.map { (step, at) -> JSONObject().put("step", step.name).put("at", at) }))
@@ -144,11 +115,6 @@ class SyncRecords(private val dir: File) {
         json.getString("outcome"),
         json.getJSONArray("detail").strings(),
     )
-
-    private fun encode(choice: Choice) = JSONObject().put("path", choice.path)
-        .put("local", choice.local ?: JSONObject.NULL).put("remote", choice.remote ?: JSONObject.NULL)
-
-    private fun decodeChoice(json: JSONObject) = Choice(json.getString("path"), json.stringOrNull("local"), json.stringOrNull("remote"))
 
     private companion object {
         const val RESULT = "result"

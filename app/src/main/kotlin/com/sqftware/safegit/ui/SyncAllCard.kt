@@ -61,6 +61,21 @@ fun SyncAllCard(rows: List<RepoRow>, all: AllRun?, onSyncAll: () -> Unit, onCanc
 /** A repo's result in the run, or while it has none, whether it is still to come. */
 @Composable
 private fun RunOutcome(result: SyncResult?, going: Boolean, running: Boolean) {
+    if (result != null) {
+        ShortOutcome(result)
+        return
+    }
+    val text = when {
+        !going -> R.string.all_not_run
+        running -> R.string.state_running
+        else -> R.string.all_waiting
+    }
+    Text(stringResource(text))
+}
+
+/** How [result] ended, in a word or two. */
+@Composable
+fun ShortOutcome(result: SyncResult) {
     val text = when (result) {
         SyncResult.UpToDate -> R.string.state_up_to_date
         is SyncResult.Synced -> R.string.state_synced
@@ -68,11 +83,6 @@ private fun RunOutcome(result: SyncResult?, going: Boolean, running: Boolean) {
         is SyncResult.Choose -> R.string.all_choose
         is SyncResult.Failed -> R.string.all_failed
         SyncResult.Cancelled -> R.string.all_cancelled
-        null -> when {
-            !going -> R.string.all_not_run
-            running -> R.string.state_running
-            else -> R.string.all_waiting
-        }
     }
     Text(stringResource(text), color = if (result is SyncResult.Failed) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface)
 }

@@ -2,7 +2,7 @@ package com.sqftware.safegit.work
 
 import com.sqftware.safegit.repos.RepoStore
 import com.sqftware.safegit.repos.SavedRepo
-import com.sqftware.safegit.sync.Pending
+import com.sqftware.safegit.sync.FileChanges
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
@@ -19,10 +19,10 @@ class OutgoingTest {
 
         override fun save(repo: SavedRepo) = Unit
     }
-    private val one = Pending(listOf("ideas.md"), emptyList(), emptyList())
-    private val two = Pending(listOf("ideas.md", "today.md"), emptyList(), emptyList())
+    private val one = FileChanges(listOf("ideas.md"), emptyList(), emptyList())
+    private val two = FileChanges(listOf("ideas.md", "today.md"), emptyList(), emptyList())
     private val reads = mutableListOf<String>()
-    private val answers = mutableMapOf<String, () -> Pending?>(notes.id to { one }, work.id to { null })
+    private val answers = mutableMapOf<String, () -> FileChanges?>(notes.id to { one }, work.id to { null })
 
     // Unconfined runs each read before the call asking for it returns
     private val outgoing = Outgoing(store, { reads += it.id; answers.getValue(it.id)() }, CoroutineScope(Dispatchers.Unconfined))
@@ -62,7 +62,7 @@ class OutgoingTest {
 
         outgoing.synced(notes)
 
-        assertEquals(emptyMap<String, Pending>(), outgoing.pending.value)
+        assertEquals(emptyMap<String, FileChanges>(), outgoing.pending.value)
         assertEquals(emptyList<String>(), reads)
     }
 
@@ -73,6 +73,6 @@ class OutgoingTest {
 
         outgoing.synced(notes)
 
-        assertEquals(emptyMap<String, Pending>(), outgoing.pending.value)
+        assertEquals(emptyMap<String, FileChanges>(), outgoing.pending.value)
     }
 }
