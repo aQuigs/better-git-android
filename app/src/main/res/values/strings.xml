@@ -58,6 +58,17 @@
     </plurals>
     <string name="state_up_to_date">Up to date</string>
     <string name="state_synced">Synced</string>
+
+    <string name="history_open">Sync history</string>
+    <string name="history_title">Sync history</string>
+    <string name="history_empty">No syncs yet. Each sync shows here, with the files it pulled and pushed.</string>
+    <string name="history_automatic">%1$s · automatic</string>
+    <string name="history_pulled">Pulled: %1$s</string>
+    <string name="history_pushed">Pushed: %1$s</string>
+    <string name="history_nothing_moved">No files pulled or pushed</string>
+    <string name="history_conflicts">Conflicted files</string>
+    <string name="history_pulled_files">Pulled</string>
+    <string name="history_pushed_files">Pushed</string>
     <string name="state_cancelled">Sync stopped before it finished. Nothing was lost, and the next sync picks up where this one left off.</string>
     <string name="state_conflict">Both sides changed the same lines. Each of these files now holds both versions, between lines starting with &lt;&lt;&lt;&lt;&lt;&lt;&lt; and &gt;&gt;&gt;&gt;&gt;&gt;&gt;. Edit them to keep what you want, then sync. Nothing is pushed until then.</string>
     <string name="state_conflict_ahead">Both sides changed the same lines of these files. An automatic sync leaves them as they are. Sync to put both versions in each file, then edit it to keep what you want.</string>

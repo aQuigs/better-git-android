@@ -24,12 +24,14 @@ import com.sqftware.safegit.sync.ChoicePreviews
 import com.sqftware.safegit.sync.Identity
 import com.sqftware.safegit.sync.Repo
 import com.sqftware.safegit.work.AutoSchedule
+import com.sqftware.safegit.work.FileSyncHistory
 import com.sqftware.safegit.sync.PendingChanges
 import com.sqftware.safegit.work.NotificationBoard
 import com.sqftware.safegit.work.Outgoing
 import com.sqftware.safegit.work.RepoLocks
 import com.sqftware.safegit.work.RunningSyncs
 import com.sqftware.safegit.work.SyncNotices
+import com.sqftware.safegit.work.SyncHistory
 import com.sqftware.safegit.work.SyncRecords
 import com.sqftware.safegit.work.Syncer
 import com.sqftware.safegit.work.WorkSyncer
@@ -49,6 +51,7 @@ class Services private constructor(context: Context) {
     }
     private val syncs = context.filesDir.resolve("syncs")
     val records = SyncRecords(syncs)
+    val history: SyncHistory = FileSyncHistory(syncs)
 
     /** Installing rewrites git's links, so it happens once per process, on first use off the main thread. */
     val git: Git by lazy { BundledGit(context).install() }

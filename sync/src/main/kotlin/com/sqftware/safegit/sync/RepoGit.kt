@@ -94,6 +94,8 @@ internal class RepoGit(val cli: Git, val repo: Repo, val identity: Identity, val
         check("diff-tree", "-r", "-z", "--no-renames", from, to).stdout.paths().chunked(2)
             .map { (entry, path) -> entry.removePrefix(":").split(" ").let { Change(path, it[0], it[1], it[2], it[3]) } }
 
+    fun changes(from: String, to: String) = diff(from, to).fileChanges()
+
     private companion object {
         const val NO = 1
     }
@@ -117,6 +119,16 @@ internal class Change(val path: String, val oldMode: String, val newMode: String
         const val GITLINK = "160000"
     }
 }
+
+internal fun List<Change>.fileChanges() = FileChanges.of(
+    associate {
+        it.path to when {
+            it.oldMode == Change.ABSENT -> FileChanges.Status.ADDED
+            it.newMode == Change.ABSENT -> FileChanges.Status.DELETED
+            else -> FileChanges.Status.CHANGED
+        }
+    },
+)
 
 /** A line of `update-index -z --index-info`; mode [Change.ABSENT] removes [path]. */
 internal fun indexEntry(mode: String, blob: String, path: String) = "$mode $blob\t$path\u0000"

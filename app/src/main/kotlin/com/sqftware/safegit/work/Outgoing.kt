@@ -2,7 +2,7 @@ package com.sqftware.safegit.work
 
 import com.sqftware.safegit.repos.RepoStore
 import com.sqftware.safegit.repos.SavedRepo
-import com.sqftware.safegit.sync.Pending
+import com.sqftware.safegit.sync.FileChanges
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -17,11 +17,11 @@ import java.util.concurrent.ConcurrentHashMap
  * large shared folder takes a while. Reads run one at a time, and a repo asked for again before its read starts is read
  * once.
  */
-class Outgoing(private val repos: RepoStore, private val read: (SavedRepo) -> Pending?, private val scope: CoroutineScope) {
-    private val current = MutableStateFlow<Map<String, Pending>>(emptyMap())
+class Outgoing(private val repos: RepoStore, private val read: (SavedRepo) -> FileChanges?, private val scope: CoroutineScope) {
+    private val current = MutableStateFlow<Map<String, FileChanges>>(emptyMap())
 
     /** By repo id; a repo not read yet, whose read failed, or about which nothing can be said yet has none. */
-    val pending: StateFlow<Map<String, Pending>> = current
+    val pending: StateFlow<Map<String, FileChanges>> = current
     private val due = ConcurrentHashMap.newKeySet<String>()
     private val wake = Channel<Unit>(Channel.CONFLATED)
 

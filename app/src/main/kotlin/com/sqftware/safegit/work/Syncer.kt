@@ -23,6 +23,7 @@ import com.sqftware.safegit.sync.RecentEdits
 import com.sqftware.safegit.sync.SafeSync
 import com.sqftware.safegit.sync.Step
 import com.sqftware.safegit.sync.SyncResult
+import com.sqftware.safegit.sync.Transfer
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
@@ -232,15 +233,17 @@ class SyncWorker(context: Context, params: WorkerParameters) : CoroutineWorker(c
             var choices = emptyMap<Choice, Keep>()
             val started = System.currentTimeMillis()
             val steps = mutableListOf<Pair<Step, Long>>()
+            var transfer = Transfer()
             val result = try {
                 if (automatic && AutoRuns.putOff(RecentEdits(services.git).latest(repo), started)) return null
                 // The user's choices wait for the sync they start; an automatic one leaves conflicts to it too
                 if (!automatic) choices = services.records.takeChoices(saved.id)
-                SafeSync(services.git, services.signIn.identity(services.device), services.device, message = CommitTemplate(saved.message))
-                    .sync(repo, services.signIn.credentials(), choices, attended = !automatic, cancellation) { step ->
-                        steps += step to System.currentTimeMillis() - started
-                        services.running.step(saved.id, step)
-                    }
+                SafeSync(services.git, services.signIn.identity(services.device), services.device, message = CommitTemplate(saved.message)).sync(
+                    repo, services.signIn.credentials(), choices, attended = !automatic, cancellation, transferred = { transfer = it },
+                ) { step ->
+                    steps += step to System.currentTimeMillis() - started
+                    services.running.step(saved.id, step)
+                }
             } catch (e: Exception) {
                 // Shown like any other failure rather than leaving the last result up as if nothing had happened
                 SyncResult.Failed(Problem.GIT, e.toString())
@@ -257,6 +260,11 @@ class SyncWorker(context: Context, params: WorkerParameters) : CoroutineWorker(c
             services.outgoing.synced(saved)
             inputData.getString(ALL)?.let { services.records.saveAllResult(it, saved.id, result) }
             services.diagnostics.record(saved, started, automatic, steps, millis, result)
+            try {
+                services.history.add(saved.id, RecordedSync(System.currentTimeMillis(), automatic, result, transfer))
+            } catch (_: Exception) {
+                // The history's file is the largest written, so the first to fail on full storage; the sync stands
+            }
             return result
         } finally {
             services.running.end(saved.id)

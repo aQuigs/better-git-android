@@ -20,7 +20,7 @@ import com.sqftware.safegit.sync.Choice
 import com.sqftware.safegit.sync.ChoicePreview
 import com.sqftware.safegit.sync.DiffLine
 import com.sqftware.safegit.sync.Keep
-import com.sqftware.safegit.sync.Pending
+import com.sqftware.safegit.sync.FileChanges
 import com.sqftware.safegit.sync.Problem
 import com.sqftware.safegit.sync.Step
 import com.sqftware.safegit.sync.SyncResult
@@ -296,7 +296,7 @@ class ReposScreenTest {
 
     @Test
     fun countsWhatTheNextSyncPushesAndOpensIntoTheFiles() {
-        val pending = Pending(changed = listOf("ideas.md", "daily/today.md"), added = listOf("new.md"), deleted = emptyList())
+        val pending = FileChanges(changed = listOf("ideas.md", "daily/today.md"), added = listOf("new.md"), deleted = emptyList())
         compose.setContent { ReposScreen(listOf(RepoRow(vault, null, pending = pending)), onSync = { _, _ -> }, onAdd = {}) }
 
         compose.onNodeWithText("new.md").assertDoesNotExist()
@@ -309,8 +309,19 @@ class ReposScreenTest {
     }
 
     @Test
+    fun opensTheSyncHistoryFromTheMenu() {
+        val opened = mutableListOf<SavedRepo>()
+        compose.setContent { ReposScreen(listOf(RepoRow(vault, null)), onSync = { _, _ -> }, onAdd = {}, onHistory = { opened += it }) }
+
+        compose.onNodeWithContentDescription("More options").performClick()
+        compose.onNodeWithText("Sync history").performClick()
+
+        assertEquals(listOf(vault), opened)
+    }
+
+    @Test
     fun saysWhenThereIsNothingToPush() {
-        val nothing = Pending(emptyList(), emptyList(), emptyList())
+        val nothing = FileChanges(emptyList(), emptyList(), emptyList())
         compose.setContent { ReposScreen(listOf(RepoRow(vault, null, pending = nothing)), onSync = { _, _ -> }, onAdd = {}) }
 
         compose.onNodeWithText("No changes on this phone to sync").assertExists()

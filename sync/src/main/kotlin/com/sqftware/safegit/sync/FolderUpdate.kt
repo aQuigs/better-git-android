@@ -27,7 +27,8 @@ import java.nio.file.attribute.BasicFileAttributes
  */
 internal class FolderUpdate(private val git: RepoGit) {
     sealed interface Result {
-        data object Done : Result
+        /** The folder holds the new version; [changes] are the files that took it. */
+        data class Done(val changes: FileChanges) : Result
 
         /** These files hold neither version, e.g. edited since the last commit, so the folder was left as it was. */
         data class Blocked(val paths: List<String>) : Result
@@ -116,7 +117,7 @@ internal class FolderUpdate(private val git: RepoGit) {
             git.check("update-index", "-z", "--index-info", input = entries.joinToString("") { indexEntry(it.newMode, it.newBlob, it.path) })
             git.check("update-ref", "HEAD", to)
             finish()
-            return Result.Done
+            return Result.Done(entries.fileChanges())
         }
 
         private fun restoreSpellings() {

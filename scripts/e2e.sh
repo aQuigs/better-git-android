@@ -270,4 +270,18 @@ for secret in 127.0.0.1 $PORT/remote Notes welcome photo /sdcard /storage; do
   [[ "$report" == *"$secret"* ]] && fail "the report shows '$secret': $report"
 done
 
+echo "== The sync history"
+tap "Cancel"
+await "More options" 10
+tap "More options"
+shot menu
+tap "Sync history"
+await "Pulled: 1 changed ▾" 10
+shot history
+tap "Pulled: 1 changed ▾"
+await "Conflicted files" 10
+shot history-open
+adb shell input keyevent KEYCODE_BACK
+await "Add a repo" 10
+
 echo "E2E passed; shots in $OUT"
