@@ -28,11 +28,13 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.net.toUri
 import com.sqftware.safegit.about.Licenses
+import com.sqftware.safegit.about.appVersion
 import com.sqftware.safegit.auth.DeviceCode
 import com.sqftware.safegit.repos.AutoSync
 import com.sqftware.safegit.repos.Connector
@@ -48,6 +50,7 @@ import com.sqftware.safegit.ui.RepoRow
 import com.sqftware.safegit.ui.ReposScreen
 import java.io.File
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 class MainActivity : ComponentActivity() {
@@ -114,11 +117,26 @@ private fun App(services: Services) {
 private fun About(services: Services, onDone: () -> Unit) {
     val context = LocalContext.current
     val licenses by produceState<Licenses?>(null) { value = withContext(Dispatchers.IO) { services.licenses.load() } }
-    val info = context.packageManager.getPackageInfo(context.packageName, 0)
+    val scope = rememberCoroutineScope()
+    var copied by rememberSaveable { mutableStateOf(false) }
     BackHandler(onBack = onDone)
 
-    AboutScreen("${info.versionName} (${info.longVersionCode})", licenses, onOpen = { open(context, it) })
+    AboutScreen(
+        context.appVersion(),
+        licenses,
+        onOpen = { open(context, it) },
+        onCopyDiagnostics = {
+            scope.launch {
+                copy(context, "SafeGit diagnostics", withContext(Dispatchers.IO) { services.diagnostics.report() })
+                copied = true
+            }
+        },
+        copied = copied,
+    )
 }
+
+private fun copy(context: Context, label: String, text: String) =
+    context.getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText(label, text))
 
 @Composable
 private fun Repos(services: Services, onAdd: () -> Unit, onAbout: () -> Unit) {
@@ -164,7 +182,7 @@ private fun Repos(services: Services, onAdd: () -> Unit, onAbout: () -> Unit) {
 
 /** Copies the code for pasting on GitHub's page, and opens it; the card shows the address for a phone with no browser. */
 private fun openCode(context: Context, code: DeviceCode) {
-    context.getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText(code.userCode, code.userCode))
+    copy(context, code.userCode, code.userCode)
     open(context, code.verificationUri)
 }
 

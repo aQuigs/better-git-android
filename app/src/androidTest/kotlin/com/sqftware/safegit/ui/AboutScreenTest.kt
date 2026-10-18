@@ -1,5 +1,8 @@
 package com.sqftware.safegit.ui
 
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.hasScrollAction
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -26,7 +29,7 @@ class AboutScreenTest {
 
     @Test
     fun listsEachPackageAndOpensItsLicense() {
-        compose.setContent { AboutScreen("0.1.0 (7)", licenses, onOpen = {}) }
+        compose.setContent { AboutScreen("0.1.0 (7)", licenses, onOpen = {}, onCopyDiagnostics = {}, copied = false) }
 
         compose.onNodeWithText("2.56.0").assertExists()
         compose.onNodeWithText("zlib").performClick()
@@ -36,7 +39,7 @@ class AboutScreenTest {
 
     @Test
     fun opensTheAppLibrariesLicense() {
-        compose.setContent { AboutScreen("0.1.0 (7)", licenses, onOpen = {}) }
+        compose.setContent { AboutScreen("0.1.0 (7)", licenses, onOpen = {}, onCopyDiagnostics = {}, copied = false) }
 
         scrollTo("Jetpack Compose, AndroidX and Kotlin")
         compose.onNodeWithText("Jetpack Compose, AndroidX and Kotlin").performClick()
@@ -47,12 +50,26 @@ class AboutScreenTest {
     @Test
     fun asksForTheSourceOfThisVersion() {
         val opened = mutableListOf<String>()
-        compose.setContent { AboutScreen("0.1.0 (7)", licenses, onOpen = { opened += it }) }
+        compose.setContent { AboutScreen("0.1.0 (7)", licenses, onOpen = { opened += it }, onCopyDiagnostics = {}, copied = false) }
 
         scrollTo("Ask for the source")
         compose.onNodeWithText("Ask for the source").performClick()
 
         assertEquals(listOf("mailto:sqftware@gmail.com?subject=SafeGit%200.1.0%20(7)%3A%20source%20code%20request"), opened)
+    }
+
+    @Test
+    fun copiesDiagnosticsAndSaysSo() {
+        var copies = 0
+        var copied by mutableStateOf(false)
+        compose.setContent { AboutScreen("0.1.0 (7)", licenses, onOpen = {}, onCopyDiagnostics = { copies++; copied = true }, copied = copied) }
+
+        scrollTo("Copy diagnostics")
+        compose.onNodeWithText("Copied. Paste it into your bug report.").assertDoesNotExist()
+        compose.onNodeWithText("Copy diagnostics").performClick()
+
+        assertEquals(1, copies)
+        compose.onNodeWithText("Copied. Paste it into your bug report.").assertExists()
     }
 
     private fun scrollTo(text: String) {

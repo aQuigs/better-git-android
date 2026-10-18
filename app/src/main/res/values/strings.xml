@@ -154,7 +154,7 @@
     <string name="add_folder_unusable">Choose a folder on this phone\'s storage.</string>
     <string name="cancel">Cancel</string>
 
-    <string name="about_open">About and licenses</string>
+    <string name="about_open">About, licenses and diagnostics</string>
     <string name="about_title">About SafeGit</string>
     <string name="about_version">Version %1$s</string>
     <string name="about_app">SafeGit is free software under the MIT License, and its source is public.</string>
@@ -167,6 +167,10 @@
     <string name="about_offer_subject">SafeGit %1$s: source code request</string>
     <string name="about_offer_termux">How Termux builds each package</string>
     <string name="about_libraries_title">Android libraries</string>
+    <string name="diagnostics_title">Report a problem</string>
+    <string name="diagnostics_body">Copies the last syncs\' steps and errors, with the versions of SafeGit, git and Android, to paste into a bug report. It leaves out what your files hold and their names, your folders, your remotes\' addresses and your sign-in.</string>
+    <string name="diagnostics_copy">Copy diagnostics</string>
+    <string name="diagnostics_copied">Copied. Paste it into your bug report.</string>
     <string name="about_app_libraries">Jetpack Compose, AndroidX and Kotlin</string>
     <string name="about_apache">Apache License 2.0</string>
 </resources>
