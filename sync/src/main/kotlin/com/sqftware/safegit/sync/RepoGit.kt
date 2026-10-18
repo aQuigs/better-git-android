@@ -4,12 +4,12 @@ import com.sqftware.safegit.git.Git
 import com.sqftware.safegit.git.GitResult
 
 /**
- * Runs git against one [repo], committing as [identity].
+ * Runs git against one [repo], committing as [identity], until [cancellation] stops it.
  *
  * Android kills child processes under memory pressure, so a git that failed must never read as an empty answer: one
  * empty diff or missing HEAD is enough to push a mass deletion. [check] and [probe] throw [GitFailure] instead.
  */
-internal class RepoGit(val cli: Git, val repo: Repo, val identity: Identity) {
+internal class RepoGit(val cli: Git, val repo: Repo, val identity: Identity, val cancellation: Cancellation = Cancellation()) {
     val emptyTree by lazy { check("mktree").stdout.trim() }
     val emptyBlob by lazy { check("hash-object", "-w", "--stdin").stdout.trim() }
     val ignoreCase by lazy { output("config", "--bool", "core.ignorecase") == "true" }
@@ -65,7 +65,7 @@ internal class RepoGit(val cli: Git, val repo: Repo, val identity: Identity) {
     }
 
     /** The same git for another repo, such as a submodule. */
-    fun at(repo: Repo) = RepoGit(cli, repo, identity)
+    fun at(repo: Repo) = RepoGit(cli, repo, identity, cancellation)
 
     /**
      * Merges three trees. Git would guess that a file added to a folder the other side renamed belongs in the renamed
