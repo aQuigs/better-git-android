@@ -1,6 +1,7 @@
 package com.sqftware.safegit.repos
 
 import com.sqftware.safegit.storage.objects
+import com.sqftware.safegit.sync.CommitTemplate
 import com.sqftware.safegit.storage.writeAtomically
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
@@ -12,8 +13,15 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 
-/** A folder connected to [branch] of a remote, by the id that names its git dir. */
-data class SavedRepo(val id: String, val url: String, val folder: File, val branch: String, val auto: AutoSync = AutoSync.OFF) {
+/** A folder connected to [branch] of a remote, by the id that names its git dir; its syncs commit with [message], a [CommitTemplate]. */
+data class SavedRepo(
+    val id: String,
+    val url: String,
+    val folder: File,
+    val branch: String,
+    val auto: AutoSync = AutoSync.OFF,
+    val message: String = CommitTemplate.DEFAULT_TEMPLATE,
+) {
     val name: String get() = folder.name
 }
 
@@ -37,7 +45,7 @@ class FileRepoStore(private val file: File, private val branchOf: (id: String) -
         // A repo saved again keeps its place, so its card stays put when a setting changes
         val next = if (repos.value.any { it.id == repo.id }) repos.value.map { if (it.id == repo.id) repo else it } else repos.value + repo
         file.writeAtomically(
-            JSONArray(next.map { JSONObject().put("id", it.id).put("url", it.url).put("folder", it.folder.path).put("branch", it.branch).put("auto", it.auto.name) }).toString(),
+            JSONArray(next.map { JSONObject().put("id", it.id).put("url", it.url).put("folder", it.folder.path).put("branch", it.branch).put("auto", it.auto.name).put("message", it.message) }).toString(),
         )
         repos.value = next
     }
@@ -48,7 +56,7 @@ class FileRepoStore(private val file: File, private val branchOf: (id: String) -
             // Repos saved before automatic syncs, or with a setting this version lacks, sync only when asked
             val auto = AutoSync.entries.find { auto -> auto.name == it.optString("auto") } ?: AutoSync.OFF
             val id = it.getString("id")
-            SavedRepo(id, it.getString("url"), File(it.getString("folder")), it.optString("branch").ifEmpty { branchOf(id) }, auto)
+            SavedRepo(id, it.getString("url"), File(it.getString("folder")), it.optString("branch").ifEmpty { branchOf(id) }, auto, it.optString("message", CommitTemplate.DEFAULT_TEMPLATE))
         }
     }
 }

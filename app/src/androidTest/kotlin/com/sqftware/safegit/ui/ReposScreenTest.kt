@@ -6,7 +6,10 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performTextReplacement
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.sqftware.safegit.repos.AutoSync
 import com.sqftware.safegit.repos.SavedRepo
@@ -130,6 +133,41 @@ class ReposScreenTest {
 
         compose.onNodeWithContentDescription("Branch: drafts").assertExists()
         compose.onNodeWithText("drafts", useUnmergedTree = true).assertExists()
+    }
+
+    @Test
+    fun setsTheCommitMessageTemplate() {
+        val saved = mutableListOf<Pair<SavedRepo, String>>()
+        compose.setContent { ReposScreen(listOf(RepoRow(vault, null)), onSync = { _, _ -> }, onAdd = {}, onMessage = { repo, message -> saved += repo to message }) }
+
+        compose.onNodeWithContentDescription("More options").performClick()
+        compose.onNodeWithText("Commit message").performClick()
+        compose.onNode(hasSetTextAction() and hasText("Changes from {device}")).assertExists()
+        compose.onNode(hasSetTextAction()).performTextReplacement("{device}: {files} files ")
+        compose.onNodeWithText("Save").performClick()
+
+        assertEquals(listOf(vault to "{device}: {files} files"), saved)
+        compose.onNodeWithText("Save").assertDoesNotExist()
+    }
+
+    @Test
+    fun anEmptyCommitMessageSavesTheDefaultAndCancelSavesNothing() {
+        val saved = mutableListOf<String>()
+        val custom = vault.copy(message = "{date}")
+        compose.setContent { ReposScreen(listOf(RepoRow(custom, null)), onSync = { _, _ -> }, onAdd = {}, onMessage = { _, message -> saved += message }) }
+
+        compose.onNodeWithContentDescription("More options").performClick()
+        compose.onNodeWithText("Commit message").performClick()
+        compose.onNode(hasSetTextAction() and hasText("{date}")).assertExists()
+        compose.onNode(hasSetTextAction()).performTextReplacement("edited")
+        compose.onNodeWithText("Cancel").performClick()
+        compose.onNodeWithContentDescription("More options").performClick()
+        compose.onNodeWithText("Commit message").performClick()
+        compose.onNode(hasSetTextAction() and hasText("{date}")).assertExists()
+        compose.onNode(hasSetTextAction()).performTextReplacement("  ")
+        compose.onNodeWithText("Save").performClick()
+
+        assertEquals(listOf("Changes from {device}"), saved)
     }
 
     @Test

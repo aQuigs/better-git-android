@@ -118,9 +118,8 @@ class SafeSync(
     private val identity: Identity,
     private val device: String,
     private val now: () -> Long = System::currentTimeMillis,
+    private val message: CommitMessage = CommitTemplate.DEFAULT,
 ) {
-    private val message = "Changes from $device"
-
     /**
      * Calls [step] as it starts each step, on the thread running the sync. A sync the user did not start, not
      * [attended], leaves conflicts to one they do: a new one ends it as [SyncResult.ConflictAhead] before the folder
@@ -298,9 +297,16 @@ class SafeSync(
             if (git.probe("diff", "--cached", "--quiet").ok) {
                 return false
             }
-            git.check("commit", "--quiet", "--no-verify", "-m", message)
+            git.check("commit", "--quiet", "--no-verify", "-m", message("--cached"))
             return true
         }
+
+        /** The message for a commit of what [diff], arguments to `git diff`, lists. */
+        private fun message(vararg diff: String) = message.write(
+            CommitFacts(device, now()) {
+                git.check("diff", "--name-only", "-z", "-M", *diff).stdout.paths().size
+            },
+        )
 
         private fun counts(head: String?, upstreamHead: String?, upstream: String): List<Int> = when {
             head == null -> listOf(0, if (upstreamHead == null) 0 else count(upstream))
@@ -346,7 +352,7 @@ class SafeSync(
             if (merge.tree == git.resolve("$upstreamHead^{tree}")) {
                 return Combined.Commit(upstreamHead)
             }
-            return Combined.Commit(git.check("commit-tree", merge.tree, "-p", upstreamHead, "-m", message).stdout.trim())
+            return Combined.Commit(git.check("commit-tree", merge.tree, "-p", upstreamHead, "-m", message(upstreamHead, merge.tree)).stdout.trim())
         }
 
         /** What [merge] cannot show with markers, including names a case-insensitive folder cannot hold side by side. */
