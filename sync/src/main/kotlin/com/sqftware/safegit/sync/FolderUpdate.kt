@@ -61,6 +61,15 @@ internal class FolderUpdate(private val git: RepoGit) {
         Move(from, to).run(resuming = false)
     }
 
+    /**
+     * Moves the folder alone from tree [from]'s files to tree [to]'s, as an edit the next sync commits: the index and
+     * branch stay. Nothing records it, since a kill leaves every file wholly one version or the other.
+     */
+    fun write(from: String, to: String): Result = git.cancellation.shielded { Move(from, to, follow = false).run(resuming = false) }
+
+    /** Whether a killed sync left a move for the next one to finish or put back. */
+    fun pending() = git.resolve(FROM) != null
+
     private fun finish() {
         git.check("update-ref", "--stdin", input = "delete $FROM\ndelete $TO\n")
         staging.deleteRecursively()
@@ -68,7 +77,8 @@ internal class FolderUpdate(private val git: RepoGit) {
 
     private enum class Side { FROM, TO }
 
-    private inner class Move(private val from: String, private val to: String) {
+    /** With [follow], the index and branch move too, once the folder has. */
+    private inner class Move(private val from: String, private val to: String, private val follow: Boolean = true) {
         private val entries = git.diff(from, to)
         private val changes = entries.filter { it.old || it.new }.associateBy { it.path }
         private val byCase = changes.keys.groupBy { it.lowercase() }
@@ -112,10 +122,12 @@ internal class FolderUpdate(private val git: RepoGit) {
                 if (change.newMode == Change.GITLINK) folder.mkdirs() else if (change.oldMode == Change.GITLINK && folder.isDirectory) folder.delete()
             }
 
-            // Only the changed entries move, so the index keeps every other file's cached stats and status stays fast
-            git.check("update-index", "-z", "--index-info", input = entries.joinToString("") { indexEntry(it.newMode, it.newBlob, it.path) })
-            git.check("update-ref", "HEAD", to)
-            finish()
+            if (follow) {
+                // Only the changed entries move, so the index keeps every other file's cached stats and status stays fast
+                git.check("update-index", "-z", "--index-info", input = entries.joinToString("") { indexEntry(it.newMode, it.newBlob, it.path) })
+                git.check("update-ref", "HEAD", to)
+            }
+            done()
             return Result.Done(entries.fileChanges())
         }
 
@@ -145,8 +157,12 @@ internal class FolderUpdate(private val git: RepoGit) {
                     return Result.WriteFailed("Could not undo a partial update of $path: ${e.message}")
                 }
             }
-            finish()
+            done()
             return null
+        }
+
+        private fun done() {
+            if (follow) finish() else staging.deleteRecursively()
         }
 
         /** Removals first, deepest first, so that a file never meets a folder or a case twin on its way in. */

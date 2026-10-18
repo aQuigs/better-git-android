@@ -49,8 +49,11 @@ class Outgoing(private val repos: RepoStore, private val read: (SavedRepo) -> Fi
         shown = false
     }
 
-    /** [repo] synced, so what it would push has changed; out of sight, it is only forgotten until the app is in front. */
-    fun synced(repo: SavedRepo) {
+    /**
+     * [repo]'s folder or branch changed, as a sync or restore changes them, so what it would push has too; out of sight,
+     * it is only forgotten until the app is in front.
+     */
+    fun changed(repo: SavedRepo) {
         if (shown) ask(listOf(repo)) else current.update { it - repo.id }
     }
 

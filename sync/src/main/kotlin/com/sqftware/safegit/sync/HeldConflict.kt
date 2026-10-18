@@ -54,6 +54,9 @@ internal class HeldConflict(private val git: RepoGit, private val markers: Marke
 
         /** The record keeps one path per line. */
         fun canRecord(path: String) = '\n' !in path && '\r' !in path
+
+        /** Whether the branch, at [head], is held at a conflict, whose commit holds edits this device never pushed. */
+        fun isHeld(git: RepoGit, head: String?) = head != null && git.resolve(REF) == head
     }
 }
 

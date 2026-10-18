@@ -257,7 +257,7 @@ class SyncWorker(context: Context, params: WorkerParameters) : CoroutineWorker(c
                 services.records.saveResult(saved.id, result)
             }
             val millis = System.currentTimeMillis() - started
-            services.outgoing.synced(saved)
+            services.outgoing.changed(saved)
             inputData.getString(ALL)?.let { services.records.saveAllResult(it, saved.id, result) }
             services.diagnostics.record(saved, started, automatic, steps, millis, result)
             try {

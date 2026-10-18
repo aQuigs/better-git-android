@@ -49,7 +49,7 @@ class OutgoingTest {
         outgoing.show()
         answers[notes.id] = { two }
 
-        outgoing.synced(notes)
+        outgoing.changed(notes)
 
         assertEquals(mapOf(notes.id to two), outgoing.pending.value)
     }
@@ -60,7 +60,7 @@ class OutgoingTest {
         outgoing.hide()
         reads.clear()
 
-        outgoing.synced(notes)
+        outgoing.changed(notes)
 
         assertEquals(emptyMap<String, FileChanges>(), outgoing.pending.value)
         assertEquals(emptyList<String>(), reads)
@@ -71,7 +71,7 @@ class OutgoingTest {
         outgoing.show()
         answers[notes.id] = { error("killed") }
 
-        outgoing.synced(notes)
+        outgoing.changed(notes)
 
         assertEquals(emptyMap<String, FileChanges>(), outgoing.pending.value)
     }

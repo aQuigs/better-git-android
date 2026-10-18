@@ -24,7 +24,6 @@ internal class MergeTree(
 
     companion object {
         private val TEXT = setOf("Auto-merging", "CONFLICT (contents)")
-        private val FILE_MODES = setOf("100644", "100755")
 
         /** Reads the output of `merge-tree --write-tree -z`. */
         fun parse(result: GitResult): MergeTree {
@@ -49,7 +48,7 @@ internal class MergeTree(
                 val ours = byStage[2]
                 val theirs = byStage[3]
                 val text = messages.filter { path in it.paths }.all { it.type in TEXT }
-                if (ours == null || theirs == null || !text || listOf(ours, theirs).any { it.mode !in FILE_MODES }) null
+                if (ours == null || theirs == null || !text || listOf(ours, theirs).any { it.mode !in Change.FILE_MODES }) null
                 else Conflicted(path, byStage[1], ours, theirs)
             }
             val unmarkable = messages.filter { it.type.startsWith("CONFLICT") }.flatMap { it.shownPaths }

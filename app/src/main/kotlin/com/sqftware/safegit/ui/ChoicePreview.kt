@@ -40,14 +40,18 @@ import com.sqftware.safegit.sync.Version
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
-/** What each side of a choice holds, side by side, over how the two differ where both are text. */
+/** What each side holds under its name, side by side, over how the two differ where both are text. */
 @Composable
-fun ChoicePreviewView(preview: ChoicePreview) {
+fun ChoicePreviewView(
+    preview: ChoicePreview,
+    localName: String = stringResource(R.string.preview_phone),
+    remoteName: String = stringResource(R.string.preview_remote),
+) {
     val diffed = preview.diff.isNotEmpty()
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            SideView(stringResource(R.string.preview_phone), sideColor(Keep.LOCAL), preview.local, diffed, Modifier.weight(1f))
-            SideView(stringResource(R.string.preview_remote), sideColor(Keep.REMOTE), preview.remote, diffed, Modifier.weight(1f))
+            SideView(localName, sideColor(Keep.LOCAL), preview.local, diffed, Modifier.weight(1f))
+            SideView(remoteName, sideColor(Keep.REMOTE), preview.remote, diffed, Modifier.weight(1f))
         }
         if (diffed) Diff(preview.diff)
     }

@@ -322,7 +322,7 @@ private fun Outcome(
 @Composable
 private fun Paths(explanation: String, paths: List<String>, action: @Composable (String) -> Unit = {}) {
     Text(explanation)
-    PathList(paths, action)
+    PathList(paths, action = action)
 }
 
 /** Asks for a [Keep] for each choice, showing what each side holds, and syncs with them once every one has one. */

@@ -13,6 +13,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Card
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -30,28 +31,32 @@ import com.sqftware.safegit.sync.FileChanges
 import com.sqftware.safegit.sync.SyncResult
 import com.sqftware.safegit.work.RecordedSync
 
-/** [name]'s last syncs, newest first, each opening into the files it moved; [syncs] is null while they load. */
+/**
+ * [name]'s last syncs, newest first, each opening into the files it moved; [syncs] is null while they load. A file
+ * opens its versions with [onFile], and [onPickFile] picks one that no sync shown has moved.
+ */
 @Composable
-fun HistoryScreen(name: String, syncs: List<RecordedSync>?) {
+fun HistoryScreen(name: String, syncs: List<RecordedSync>?, onFile: (String) -> Unit = {}, onPickFile: () -> Unit = {}) {
     Scaffold { padding ->
         LazyColumn(Modifier.fillMaxSize().padding(padding), contentPadding = PaddingValues(16.dp)) {
             item {
                 Column(Modifier.padding(bottom = 12.dp)) {
                     Text(stringResource(R.string.history_title), style = MaterialTheme.typography.headlineSmall)
                     Text(name, style = MaterialTheme.typography.bodyMedium)
+                    OutlinedButton(onClick = onPickFile, Modifier.padding(top = 8.dp)) { Text(stringResource(R.string.history_pick_file)) }
                 }
             }
             if (syncs?.isEmpty() == true) {
                 item { Text(stringResource(R.string.history_empty), style = MaterialTheme.typography.bodyLarge) }
             }
             // Two syncs of a repo never end in the same millisecond, as they never overlap
-            items(syncs.orEmpty(), key = { it.at }) { PastSyncCard(it) }
+            items(syncs.orEmpty(), key = { it.at }) { PastSyncCard(it, onFile) }
         }
     }
 }
 
 @Composable
-private fun PastSyncCard(sync: RecordedSync) {
+private fun PastSyncCard(sync: RecordedSync, onFile: (String) -> Unit) {
     val (pulled, pushed) = sync.transfer
     val paths = when (val result = sync.result) {
         is SyncResult.Conflict -> result.paths
@@ -78,15 +83,15 @@ private fun PastSyncCard(sync: RecordedSync) {
             (sync.result as? SyncResult.Failed)?.let { Failure(it.problem, it.detail) }
             if (paths.isNotEmpty()) {
                 Section(stringResource(R.string.history_conflicts))
-                PathList(paths)
+                PathList(paths, onFile)
             }
             if (!pulled.isEmpty()) {
                 Section(stringResource(R.string.history_pulled_files))
-                FileList(pulled)
+                FileList(pulled, onFile)
             }
             if (!pushed.isEmpty()) {
                 Section(stringResource(R.string.history_pushed_files))
-                FileList(pushed)
+                FileList(pushed, onFile)
             }
         }
     }

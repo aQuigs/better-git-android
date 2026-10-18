@@ -9,6 +9,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -32,6 +33,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.core.net.toUri
 import com.sqftware.safegit.about.Licenses
 import com.sqftware.safegit.about.appVersion
@@ -42,7 +44,10 @@ import com.sqftware.safegit.repos.RemoteBranches
 import com.sqftware.safegit.repos.SavedRepo
 import com.sqftware.safegit.storage.AllFilesAccess
 import com.sqftware.safegit.storage.StorageAccess
+import com.sqftware.safegit.storage.OpenDocumentIn
+import com.sqftware.safegit.storage.pathIn
 import com.sqftware.safegit.storage.folderOf
+import com.sqftware.safegit.sync.FileVersions
 import com.sqftware.safegit.ui.AboutScreen
 import com.sqftware.safegit.ui.AccessScreen
 import com.sqftware.safegit.ui.AccountCard
@@ -51,6 +56,8 @@ import com.sqftware.safegit.ui.HistoryScreen
 import com.sqftware.safegit.ui.RepoRow
 import com.sqftware.safegit.ui.ReposScreen
 import com.sqftware.safegit.ui.ResolveScreen
+import com.sqftware.safegit.ui.RestoreOutcome
+import com.sqftware.safegit.ui.VersionsScreen
 import java.io.File
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -158,9 +165,63 @@ private fun copy(context: Context, label: String, text: String) =
 private fun History(services: Services, id: String, onDone: () -> Unit) {
     val repos by services.repos.all.collectAsState(null)
     val syncs by remember(id) { services.history.of(id) }.collectAsState(null)
-    BackHandler(onBack = onDone)
+    var file by rememberSaveable { mutableStateOf<String?>(null) }
+    val saved = repos?.find { it.id == id }
+    val context = LocalContext.current
+    val outside = stringResource(R.string.history_pick_outside, saved?.folder?.path.orEmpty())
+    val pick = rememberLauncherForActivityResult(OpenDocumentIn(saved?.folder)) { document ->
+        val folder = saved?.folder ?: return@rememberLauncherForActivityResult
+        document ?: return@rememberLauncherForActivityResult
+        val path = pathIn(folder, document)
+        if (path == null) Toast.makeText(context, outside, Toast.LENGTH_LONG).show() else file = path
+    }
+    BackHandler { if (file != null) file = null else onDone() }
 
-    HistoryScreen(repos?.find { it.id == id }?.name.orEmpty(), syncs)
+    val shown = file
+    if (shown != null && saved != null) {
+        Versions(services, saved, shown)
+    } else {
+        HistoryScreen(saved?.name.orEmpty(), syncs, onFile = { file = it }, onPickFile = { pick.launch(arrayOf("*/*")) })
+    }
+}
+
+@Composable
+private fun Versions(services: Services, saved: SavedRepo, path: String) {
+    var versions by remember(path) { mutableStateOf<FileVersions?>(null) }
+    var unreadable by remember(path) { mutableStateOf<String?>(null) }
+    var restoring by remember(path) { mutableStateOf(false) }
+    var outcome by remember(path) { mutableStateOf<RestoreOutcome?>(null) }
+    val scope = rememberCoroutineScope()
+    LaunchedEffect(path) {
+        try {
+            versions = withContext(Dispatchers.IO) { services.versions(saved, path) }
+        } catch (e: Exception) {
+            unreadable = e.message.orEmpty()
+        }
+    }
+
+    VersionsScreen(
+        path,
+        versions,
+        preview = { version -> versions?.let { services.preview(saved, path, it, version) } },
+        onRestore = { version ->
+            val seen = versions ?: return@VersionsScreen
+            restoring = true
+            scope.launch {
+                outcome = withContext(Dispatchers.IO) {
+                    try {
+                        RestoreOutcome.Ended(services.restore(saved, path, seen, version))
+                    } catch (e: Exception) {
+                        RestoreOutcome.Failed(e.message.orEmpty())
+                    }
+                }
+                restoring = false
+            }
+        },
+        restoring = restoring,
+        outcome = outcome,
+        unreadable = unreadable,
+    )
 }
 
 @Composable

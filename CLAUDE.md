@@ -24,6 +24,7 @@ Git Sync (ViscousPot/GitSync, Flutter + libgit2) loses work: its pull merges and
   - never takes an edit as a held conflict's resolution: a user halfway through one may pause. Only the button finishes it.
   - retries a failure that may pass hourly when its period is 6 h or more; a shorter period waits for its next run.
   - notifies only what needs the user (a conflict, a choice, the sign-in refused, a failure that has lasted a day), once per change of state (`SyncNotices`).
+- **Restoring a version:** `FileHistory` writes a file's past version into the folder by atomic rename, only over the last commit's version, so an edit not synced yet is never lost. History is never rewritten: the next sync commits it as an edit.
 
 ## Sync must never lose data
 
@@ -90,7 +91,7 @@ scripts/emulator-lock.sh scripts/e2e.sh  # after assembleDebug: the app through 
 ```text
 sync/src/main/kotlin/com/sqftware/safegit/
 ├── git/                 # the Git interface and CliGit, which runs any git executable
-└── sync/                # SafeSync (one sync: commit, fetch, merge, move the folder, push), FolderUpdate, RepoSetup
+└── sync/                # SafeSync (one sync: commit, fetch, merge, move the folder, push), FolderUpdate, RepoSetup, FileHistory
 app/src/main/kotlin/com/sqftware/safegit/
 ├── MainActivity.kt      # all-files access, then the repo list or the add screen
 ├── about/               # the licenses of what the app ships, for the About screen
