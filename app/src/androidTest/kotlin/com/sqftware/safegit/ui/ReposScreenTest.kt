@@ -138,12 +138,14 @@ class ReposScreenTest {
     @Test
     fun setsTheCommitMessageTemplate() {
         val saved = mutableListOf<Pair<SavedRepo, String>>()
-        compose.setContent { ReposScreen(listOf(RepoRow(vault, null)), onSync = { _, _ -> }, onAdd = {}, onMessage = { repo, message -> saved += repo to message }) }
+        compose.setContent { ReposScreen(listOf(RepoRow(vault, null)), onSync = { _, _ -> }, onAdd = {}, onMessage = { repo, message -> saved += repo to message }, device = "Pixel 9") }
 
         compose.onNodeWithContentDescription("More options").performClick()
-        compose.onNodeWithText("Commit message").performClick()
+        compose.onNodeWithText("Commit message template").performClick()
         compose.onNode(hasSetTextAction() and hasText("Changes from {device}")).assertExists()
+        compose.onNodeWithText("Example: Changes from Pixel 9").assertExists()
         compose.onNode(hasSetTextAction()).performTextReplacement("{device}: {files} files ")
+        compose.onNodeWithText("Example: Pixel 9: 3 files").assertExists()
         compose.onNodeWithText("Save").performClick()
 
         assertEquals(listOf(vault to "{device}: {files} files"), saved)
@@ -157,12 +159,12 @@ class ReposScreenTest {
         compose.setContent { ReposScreen(listOf(RepoRow(custom, null)), onSync = { _, _ -> }, onAdd = {}, onMessage = { _, message -> saved += message }) }
 
         compose.onNodeWithContentDescription("More options").performClick()
-        compose.onNodeWithText("Commit message").performClick()
+        compose.onNodeWithText("Commit message template").performClick()
         compose.onNode(hasSetTextAction() and hasText("{date}")).assertExists()
         compose.onNode(hasSetTextAction()).performTextReplacement("edited")
         compose.onNodeWithText("Cancel").performClick()
         compose.onNodeWithContentDescription("More options").performClick()
-        compose.onNodeWithText("Commit message").performClick()
+        compose.onNodeWithText("Commit message template").performClick()
         compose.onNode(hasSetTextAction() and hasText("{date}")).assertExists()
         compose.onNode(hasSetTextAction()).performTextReplacement("  ")
         compose.onNodeWithText("Save").performClick()

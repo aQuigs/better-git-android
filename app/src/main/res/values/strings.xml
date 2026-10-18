@@ -78,8 +78,10 @@
     <string name="auto_weekly">Every week</string>
 
     <string name="repo_menu">More options</string>
-    <string name="commit_message">Commit message</string>
-    <string name="commit_message_help">{device} stands for this phone\'s name, {date} for the day and {files} for the number of files changed. Leave it empty for the default.</string>
+    <string name="commit_message">Commit message template</string>
+    <string name="commit_message_label">Template</string>
+    <string name="commit_message_example">Example: %1$s</string>
+    <string name="commit_message_help">{device}, {date} and {files} fill in this phone\'s name, the day and the number of files changed. Leave it empty for the default.</string>
     <string name="save">Save</string>
 
     <string name="notice_channel">Syncs that need you</string>
