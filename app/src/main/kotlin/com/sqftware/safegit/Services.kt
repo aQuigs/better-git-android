@@ -17,6 +17,9 @@ import com.sqftware.safegit.repos.GitHubRepoDirectory
 import com.sqftware.safegit.repos.RemoteBranches
 import com.sqftware.safegit.repos.RepoStore
 import com.sqftware.safegit.repos.SavedRepo
+import com.sqftware.safegit.sync.Choice
+import com.sqftware.safegit.sync.ChoicePreview
+import com.sqftware.safegit.sync.ChoicePreviews
 import com.sqftware.safegit.sync.Identity
 import com.sqftware.safegit.sync.Repo
 import com.sqftware.safegit.work.AutoSchedule
@@ -73,6 +76,13 @@ class Services private constructor(context: Context) {
     val branches = RemoteBranches(connector::branches)
 
     fun repo(saved: SavedRepo) = Repo(gitDir(saved.id), saved.folder)
+
+    /** Null when it cannot be read, as the choice can still be made by its path alone. */
+    fun preview(saved: SavedRepo, choice: Choice): ChoicePreview? = try {
+        ChoicePreviews(git, repo(saved)).of(choice)
+    } catch (_: Exception) {
+        null
+    }
 
     private fun gitDir(id: String) = gitDirs.resolve("$id.git")
 

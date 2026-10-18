@@ -15,6 +15,10 @@ interface Git {
 
 fun Git.run(dir: File, vararg args: String) = run(dir, args.toList())
 
-data class GitResult(val exitCode: Int, val stdout: String, val stderr: String) {
+/** [bytes] is stdout as git wrote it, for a file's contents; [stdout] is the same as text. */
+class GitResult(val exitCode: Int, val bytes: ByteArray, val stderr: String) {
+    constructor(exitCode: Int, stdout: String, stderr: String) : this(exitCode, stdout.encodeToByteArray(), stderr)
+
+    val stdout by lazy { bytes.decodeToString() }
     val ok get() = exitCode == 0
 }

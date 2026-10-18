@@ -149,6 +149,7 @@ private fun Repos(services: Services, onAdd: () -> Unit, onAbout: () -> Unit) {
         onSyncAll = services.syncer::syncAll,
         onCancelAll = services.syncer::cancelAll,
         onCloseAll = services.syncer::closeAll,
+        preview = services::preview,
         header = {
             AccountCard(
                 account,

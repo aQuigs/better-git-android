@@ -32,8 +32,10 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -50,6 +52,7 @@ import com.sqftware.safegit.R
 import com.sqftware.safegit.repos.AutoSync
 import com.sqftware.safegit.repos.SavedRepo
 import com.sqftware.safegit.sync.Choice
+import com.sqftware.safegit.sync.ChoicePreview
 import com.sqftware.safegit.sync.CommitFacts
 import com.sqftware.safegit.sync.CommitTemplate
 import com.sqftware.safegit.sync.Keep
@@ -59,6 +62,7 @@ import com.sqftware.safegit.sync.Step
 import com.sqftware.safegit.sync.SyncResult
 import com.sqftware.safegit.work.AllRun
 import com.sqftware.safegit.work.SyncState
+import kotlinx.coroutines.withContext
 
 /**
  * A connected repo as the list shows it; [canSignIn] when a new sign-in could help its remote, and none is under way.
@@ -68,7 +72,8 @@ data class RepoRow(val repo: SavedRepo, val state: SyncState?, val canSignIn: Bo
 
 /**
  * The connected repos, under [header], such as the account syncs run as; [onSignIn] replaces a sign-in a remote refused.
- * With more than one, they can all be synced at once; [all] is the last such sync.
+ * With more than one, they can all be synced at once; [all] is the last such sync. [preview] reads what each side of a
+ * choice holds, off the main thread, or null when it cannot.
  */
 @Composable
 fun ReposScreen(
@@ -85,6 +90,7 @@ fun ReposScreen(
     onSyncAll: () -> Unit = {},
     onCancelAll: () -> Unit = {},
     onCloseAll: () -> Unit = {},
+    preview: (SavedRepo, Choice) -> ChoicePreview? = { _, _ -> null },
     header: @Composable () -> Unit = {},
 ) {
     Scaffold(
@@ -97,7 +103,16 @@ fun ReposScreen(
                 item { Text(stringResource(R.string.repos_empty), Modifier.padding(8.dp), style = MaterialTheme.typography.bodyLarge) }
             }
             items(rows, key = { it.repo.id }) { row ->
-                RepoCard(row, onSync = { choices -> onSync(row.repo, choices) }, onCancel = { onCancel(row.repo) }, onSignIn, onAuto = { onAuto(row.repo, it) }, onMessage = { onMessage(row.repo, it) }, device)
+                RepoCard(
+                    row,
+                    onSync = { choices -> onSync(row.repo, choices) },
+                    onCancel = { onCancel(row.repo) },
+                    onSignIn,
+                    onAuto = { onAuto(row.repo, it) },
+                    onMessage = { onMessage(row.repo, it) },
+                    device,
+                    preview = { preview(row.repo, it) },
+                )
             }
             item { TextButton(onClick = onAbout) { Text(stringResource(R.string.about_open)) } }
         }
@@ -113,6 +128,7 @@ private fun RepoCard(
     onAuto: (AutoSync) -> Unit,
     onMessage: (String) -> Unit,
     device: String,
+    preview: (Choice) -> ChoicePreview?,
 ) {
     Card(Modifier.fillMaxWidth().padding(bottom = 12.dp)) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -129,7 +145,7 @@ private fun RepoCard(
                     Text(stringResource(if (state is SyncState.Running) runningText(state) else R.string.state_waiting))
                     LinearProgressIndicator(Modifier.fillMaxWidth())
                 }
-                is SyncState.Finished -> Outcome(state.result, kept, onSync, row.canSignIn, onSignIn)
+                is SyncState.Finished -> Outcome(state.result, kept, onSync, row.canSignIn, onSignIn, preview)
             }
             row.pending?.let { PendingFiles(it) }
 
@@ -291,13 +307,20 @@ private fun autoText(auto: AutoSync) = when (auto) {
 }
 
 @Composable
-private fun Outcome(result: SyncResult, kept: MutableMap<Choice, Keep>, onSync: (Map<Choice, Keep>) -> Unit, canSignIn: Boolean, onSignIn: () -> Unit) {
+private fun Outcome(
+    result: SyncResult,
+    kept: MutableMap<Choice, Keep>,
+    onSync: (Map<Choice, Keep>) -> Unit,
+    canSignIn: Boolean,
+    onSignIn: () -> Unit,
+    preview: (Choice) -> ChoicePreview?,
+) {
     when (result) {
         SyncResult.UpToDate -> Text(stringResource(R.string.state_up_to_date))
         is SyncResult.Synced -> Text(stringResource(R.string.state_synced))
         is SyncResult.Conflict -> Paths(stringResource(R.string.state_conflict), result.paths)
         is SyncResult.ConflictAhead -> Paths(stringResource(R.string.state_conflict_ahead), result.paths)
-        is SyncResult.Choose -> Choices(result.choices, kept, onSync)
+        is SyncResult.Choose -> Choices(result.choices, kept, onSync, preview)
         is SyncResult.Failed -> {
             Failure(result.problem, result.detail)
             if (result.problem == Problem.SIGN_IN && canSignIn) OutlinedButton(onClick = onSignIn) { Text(stringResource(R.string.sign_in_again)) }
@@ -314,17 +337,21 @@ private fun Paths(explanation: String, paths: List<String>) {
     }
 }
 
-/** Asks for a [Keep] for each choice, and syncs with them once every one has one. */
+/** Asks for a [Keep] for each choice, showing what each side holds, and syncs with them once every one has one. */
 @Composable
-private fun Choices(choices: List<Choice>, kept: MutableMap<Choice, Keep>, onSync: (Map<Choice, Keep>) -> Unit) {
+private fun Choices(choices: List<Choice>, kept: MutableMap<Choice, Keep>, onSync: (Map<Choice, Keep>) -> Unit, preview: (Choice) -> ChoicePreview?) {
     Text(stringResource(R.string.state_choose))
     for (choice in choices) {
-        Column {
-            Text(choice.path, fontFamily = FontFamily.Monospace)
-            Text(sides(choice), style = MaterialTheme.typography.bodySmall)
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                FilterChip(kept[choice] == Keep.LOCAL, onClick = { kept[choice] = Keep.LOCAL }, label = { Text(stringResource(R.string.keep_local)) })
-                FilterChip(kept[choice] == Keep.REMOTE, onClick = { kept[choice] = Keep.REMOTE }, label = { Text(stringResource(R.string.keep_remote)) })
+        // Keyed, so another choice's preview never shows over this one's chips while this one's loads
+        key(choice) {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(choice.path, fontFamily = FontFamily.Monospace)
+                val shown by produceState<ChoicePreview?>(null) { value = withContext(previewing) { preview(choice) } }
+                shown?.let { ChoicePreviewView(it) } ?: Text(sides(choice), style = MaterialTheme.typography.bodySmall)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    FilterChip(kept[choice] == Keep.LOCAL, onClick = { kept[choice] = Keep.LOCAL }, label = { Text(stringResource(R.string.keep_local)) })
+                    FilterChip(kept[choice] == Keep.REMOTE, onClick = { kept[choice] = Keep.REMOTE }, label = { Text(stringResource(R.string.keep_remote)) })
+                }
             }
         }
     }

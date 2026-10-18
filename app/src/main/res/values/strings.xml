@@ -68,6 +68,24 @@
     <string name="choice_sides">This phone %1$s, the remote %2$s</string>
     <string name="keep_local">Keep this phone\'s</string>
     <string name="keep_remote">Keep the remote\'s</string>
+    <string name="preview_phone">This phone</string>
+    <string name="preview_remote">The remote</string>
+    <string name="preview_deleted">Deleted</string>
+    <plurals name="preview_folder">
+        <item quantity="one">A folder of %1$d file</item>
+        <item quantity="other">A folder of %1$d files</item>
+    </plurals>
+    <plurals name="preview_lines">
+        <item quantity="one">%1$d line</item>
+        <item quantity="other">%1$d lines</item>
+    </plurals>
+    <plurals name="preview_more_lines">
+        <item quantity="one">and %1$d more line</item>
+        <item quantity="other">and %1$d more lines</item>
+    </plurals>
+    <string name="preview_file">A file of %1$s</string>
+    <string name="preview_image">%1$s: image</string>
+    <string name="preview_elsewhere">Version %1$s, kept in a submodule</string>
 
     <string name="auto_sync">Auto sync: %1$s</string>
     <string name="auto_off">Off</string>
