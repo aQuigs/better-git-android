@@ -29,6 +29,8 @@ class SyncNotices(private val dir: File, private val board: NoticeBoard, private
     /** After a sync of [repo]; one the user started shows nothing, since they have the app open. */
     @Synchronized
     fun after(repo: SavedRepo, result: SyncResult, automatic: Boolean) {
+        // A sync stopped before it finished says nothing new about the repo
+        if (result == SyncResult.Cancelled) return
         val last = read(repo.id)
         val failingSince = if (result is SyncResult.Failed) last.failingSince ?: now() else null
         val need = need(result, failingSince)
@@ -64,7 +66,7 @@ class SyncNotices(private val dir: File, private val board: NoticeBoard, private
             failingSince != null && now() - failingSince >= FAILING_FOR.inWholeMilliseconds -> Need(Notice.FAILING)
             else -> null
         }
-        SyncResult.UpToDate, is SyncResult.Synced -> null
+        SyncResult.UpToDate, is SyncResult.Synced, SyncResult.Cancelled -> null
     }
 
     /** [shown] is the key of the notice up, or of the need the user last saw in the app. */

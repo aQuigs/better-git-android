@@ -25,6 +25,7 @@ class SyncRecordsTest {
             SyncResult.ConflictAhead(listOf("a.md")),
             SyncResult.Choose(listOf(Choice("photo.png", "a1", null))),
             SyncResult.Failed(Problem.FETCH, "no network"),
+            SyncResult.Cancelled,
         )
         for (result in results) {
             records.saveResult("repo", result)

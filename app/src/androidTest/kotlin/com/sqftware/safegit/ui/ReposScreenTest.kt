@@ -48,11 +48,33 @@ class ReposScreenTest {
     }
 
     @Test
-    fun saysWhichStepTheSyncIsOn() {
-        compose.setContent { ReposScreen(listOf(RepoRow(vault, SyncState.Running(Step.COMMIT))), onSync = { _, _ -> }, onAdd = {}) }
+    fun saysWhichStepTheSyncIsOnAndCancelsIt() {
+        val cancelled = mutableListOf<SavedRepo>()
+        compose.setContent {
+            ReposScreen(listOf(RepoRow(vault, SyncState.Running(Step.COMMIT))), onSync = { _, _ -> }, onAdd = {}, onCancel = { cancelled += it })
+        }
 
         compose.onNodeWithText("Committing this phone's changes…").assertExists()
-        compose.onNodeWithText("Sync").assertIsNotEnabled()
+        compose.onNodeWithText("Sync").assertDoesNotExist()
+        compose.onNodeWithText("Cancel").performClick()
+
+        assertEquals(listOf(vault), cancelled)
+    }
+
+    @Test
+    fun saysASyncIsCancelling() {
+        compose.setContent { ReposScreen(listOf(RepoRow(vault, SyncState.Running(Step.FETCH, cancelling = true))), onSync = { _, _ -> }, onAdd = {}) }
+
+        compose.onNodeWithText("Cancelling…").assertExists()
+        compose.onNodeWithText("Cancel").assertIsNotEnabled()
+    }
+
+    @Test
+    fun saysASyncWasCancelled() {
+        compose.setContent { ReposScreen(listOf(RepoRow(vault, SyncState.Finished(SyncResult.Cancelled))), onSync = { _, _ -> }, onAdd = {}) }
+
+        compose.onNodeWithText("Sync stopped before it finished. Nothing was lost, and the next sync picks up where this one left off.").assertExists()
+        compose.onNodeWithText("Sync").assertIsEnabled()
     }
 
     @Test
@@ -220,6 +242,20 @@ class ReposScreenTest {
         compose.onNodeWithText("Waiting").assertExists()
         compose.onNodeWithText("Sync all").assertIsNotEnabled()
         compose.onNodeWithText("Close").assertDoesNotExist()
+    }
+
+    @Test
+    fun cancelsTheSyncOfAll() {
+        val all = AllRun(listOf("1", "2"), mapOf("1" to SyncResult.Cancelled), going = true)
+        var cancelled = 0
+        compose.setContent {
+            ReposScreen(listOf(RepoRow(vault, null), RepoRow(journal, SyncState.Waiting)), onSync = { _, _ -> }, onAdd = {}, all = all, onCancelAll = { cancelled++ })
+        }
+
+        compose.onNodeWithText("Stopped").assertExists()
+        compose.onNodeWithText("Cancel").performClick()
+
+        assertEquals(1, cancelled)
     }
 
     @Test

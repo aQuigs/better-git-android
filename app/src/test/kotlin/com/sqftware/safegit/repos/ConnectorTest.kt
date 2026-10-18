@@ -38,11 +38,15 @@ class ConnectorTest {
             synced += repo
         }
 
+        override fun cancel(repo: SavedRepo) = Unit
+
         override fun setAuto(repo: SavedRepo, auto: AutoSync) = Unit
 
         override val all: Flow<AllRun?> = emptyFlow()
 
         override fun syncAll() = Unit
+
+        override fun cancelAll() = Unit
 
         override fun closeAll() = Unit
     }

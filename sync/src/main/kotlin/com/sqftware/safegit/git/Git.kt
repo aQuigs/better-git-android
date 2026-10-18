@@ -7,6 +7,8 @@ interface Git {
     /**
      * Runs `git [args]` in [dir], with [environment] added for this call only, such as a token's config, and [input] on
      * its stdin, such as a list of paths too long for the command line.
+     *
+     * An interrupt of the calling thread stops git cleanly and throws [InterruptedException] once git has exited.
      */
     fun run(dir: File, args: List<String>, environment: Map<String, String> = emptyMap(), input: String = ""): GitResult
 }

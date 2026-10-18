@@ -52,6 +52,9 @@ sealed interface SyncResult {
 
     data class Failed(val problem: Problem, val detail: String = "") : SyncResult
 
+    /** Stopped by a [Cancellation]. What it did stays, such as committing the local changes, and the next sync goes on from there. */
+    data object Cancelled : SyncResult
+
     /** Whether the folder and the remote now agree, with nothing left for the user. */
     val done: Boolean get() = this == UpToDate || this is Synced
 }
@@ -121,17 +124,24 @@ class SafeSync(
     /**
      * Calls [step] as it starts each step, on the thread running the sync. A sync the user did not start, not
      * [attended], leaves conflicts to one they do: a new one ends it as [SyncResult.ConflictAhead] before the folder
-     * moves, so markers never appear in a note the user has open, and a held one is never taken as resolved.
+     * moves, so markers never appear in a note the user has open, and a held one is never taken as resolved. Once
+     * [cancellation] says so, the sync ends [SyncResult.Cancelled].
      */
     fun sync(
         repo: Repo,
         credentials: Credentials = Credentials.NONE,
         choices: Map<Choice, Keep> = emptyMap(),
         attended: Boolean = true,
+        cancellation: Cancellation = Cancellation(),
         step: (Step) -> Unit = {},
-    ): SyncResult = nested(repo, credentials, choices, step, attended, fetched = false).let { (result, problems) ->
+    ): SyncResult {
+        val (result, problems) = try {
+            cancellation.running { nested(repo, credentials, choices, step, attended, cancellation, fetched = false) }
+        } catch (_: InterruptedException) {
+            return SyncResult.Cancelled
+        }
         // The user should hear about a submodule left behind even though the rest synced
-        if (problems.isEmpty() || (result != SyncResult.UpToDate && result !is SyncResult.Synced)) result
+        return if (problems.isEmpty() || (result != SyncResult.UpToDate && result !is SyncResult.Synced)) result
         else SyncResult.Failed(Problem.SUBMODULE, problems.entries.joinToString("\n") { (path, problem) -> "$path: $problem" })
     }
 
@@ -142,9 +152,10 @@ class SafeSync(
         choices: Map<Choice, Keep>,
         step: (Step) -> Unit,
         attended: Boolean,
+        cancellation: Cancellation,
         fetched: Boolean,
     ): NestedSync {
-        val session = Session(RepoGit(git, repo, identity), credentials, choices, step, attended, fetched)
+        val session = Session(RepoGit(git, repo, identity, cancellation), credentials, choices, step, attended, fetched)
         val result = try {
             session.sync()
         } catch (e: GitFailure) {
@@ -169,7 +180,7 @@ class SafeSync(
         private val held = HeldConflict(git, markers)
         private val backups = Backups(git)
         val submodules = SubmoduleSync(git, credentials, choices, step, now) { repo, choices ->
-            nested(repo, credentials, choices, step, attended, fetched = true)
+            nested(repo, credentials, choices, step, attended, git.cancellation, fetched = true)
         }
 
         fun sync(): SyncResult {

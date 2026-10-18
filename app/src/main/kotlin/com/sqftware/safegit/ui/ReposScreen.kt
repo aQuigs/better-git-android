@@ -65,11 +65,13 @@ fun ReposScreen(
     rows: List<RepoRow>,
     onSync: (SavedRepo, Map<Choice, Keep>) -> Unit,
     onAdd: () -> Unit,
+    onCancel: (SavedRepo) -> Unit = {},
     onSignIn: () -> Unit = {},
     onAuto: (SavedRepo, AutoSync) -> Unit = { _, _ -> },
     onAbout: () -> Unit = {},
     all: AllRun? = null,
     onSyncAll: () -> Unit = {},
+    onCancelAll: () -> Unit = {},
     onCloseAll: () -> Unit = {},
     header: @Composable () -> Unit = {},
 ) {
@@ -78,12 +80,12 @@ fun ReposScreen(
     ) { padding ->
         LazyColumn(Modifier.fillMaxSize().padding(padding), contentPadding = PaddingValues(16.dp)) {
             item { header() }
-            if (rows.size > 1) item { SyncAllCard(rows, all, onSyncAll, onCloseAll) }
+            if (rows.size > 1) item { SyncAllCard(rows, all, onSyncAll, onCancelAll, onCloseAll) }
             if (rows.isEmpty()) {
                 item { Text(stringResource(R.string.repos_empty), Modifier.padding(8.dp), style = MaterialTheme.typography.bodyLarge) }
             }
             items(rows, key = { it.repo.id }) { row ->
-                RepoCard(row, onSync = { choices -> onSync(row.repo, choices) }, onSignIn, onAuto = { onAuto(row.repo, it) })
+                RepoCard(row, onSync = { choices -> onSync(row.repo, choices) }, onCancel = { onCancel(row.repo) }, onSignIn, onAuto = { onAuto(row.repo, it) })
             }
             item { TextButton(onClick = onAbout) { Text(stringResource(R.string.about_open)) } }
         }
@@ -91,7 +93,7 @@ fun ReposScreen(
 }
 
 @Composable
-private fun RepoCard(row: RepoRow, onSync: (Map<Choice, Keep>) -> Unit, onSignIn: () -> Unit, onAuto: (AutoSync) -> Unit) {
+private fun RepoCard(row: RepoRow, onSync: (Map<Choice, Keep>) -> Unit, onCancel: () -> Unit, onSignIn: () -> Unit, onAuto: (AutoSync) -> Unit) {
     Card(Modifier.fillMaxWidth().padding(bottom = 12.dp)) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text(row.repo.name, style = MaterialTheme.typography.titleMedium)
@@ -102,7 +104,7 @@ private fun RepoCard(row: RepoRow, onSync: (Map<Choice, Keep>) -> Unit, onSignIn
             when (val state = row.state) {
                 null -> Text(stringResource(R.string.state_never))
                 SyncState.Waiting, is SyncState.Running -> {
-                    Text(stringResource(if (state is SyncState.Running) stepText(state.step) else R.string.state_waiting))
+                    Text(stringResource(if (state is SyncState.Running) runningText(state) else R.string.state_waiting))
                     LinearProgressIndicator(Modifier.fillMaxWidth())
                 }
                 is SyncState.Finished -> Outcome(state.result, kept, onSync, row.canSignIn, onSignIn)
@@ -112,8 +114,11 @@ private fun RepoCard(row: RepoRow, onSync: (Map<Choice, Keep>) -> Unit, onSignIn
             // A choice syncs with its own button
             val choosing = (row.state as? SyncState.Finished)?.result is SyncResult.Choose
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                if (!choosing) {
-                    Button(onClick = { onSync(emptyMap()) }, enabled = row.state == null || row.state is SyncState.Finished) { Text(stringResource(R.string.sync)) }
+                val running = row.state as? SyncState.Running
+                if (running != null) {
+                    OutlinedButton(onClick = onCancel, enabled = !running.cancelling) { Text(stringResource(R.string.cancel)) }
+                } else if (!choosing) {
+                    Button(onClick = { onSync(emptyMap()) }, enabled = row.state != SyncState.Waiting) { Text(stringResource(R.string.sync)) }
                 }
                 AutoSyncPicker(row.repo.auto, onAuto)
             }
@@ -203,6 +208,7 @@ private fun Outcome(result: SyncResult, kept: MutableMap<Choice, Keep>, onSync: 
             Failure(result.problem, result.detail)
             if (result.problem == Problem.SIGN_IN && canSignIn) OutlinedButton(onClick = onSignIn) { Text(stringResource(R.string.sign_in_again)) }
         }
+        SyncResult.Cancelled -> Text(stringResource(R.string.state_cancelled))
     }
 }
 
@@ -241,7 +247,7 @@ private fun sides(choice: Choice) = when {
 @Composable
 private fun side(objectId: String?) = stringResource(if (objectId == null) R.string.side_none else R.string.side_file)
 
-private fun stepText(step: Step?) = when (step) {
+private fun runningText(state: SyncState.Running) = if (state.cancelling) R.string.state_cancelling else when (state.step) {
     null -> R.string.state_running
     Step.COMMIT -> R.string.step_commit
     Step.FETCH -> R.string.step_fetch

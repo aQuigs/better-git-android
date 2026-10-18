@@ -92,6 +92,7 @@ class SyncRecords(private val dir: File) {
         is SyncResult.ConflictAhead -> JSONObject().put("type", "conflictAhead").put("paths", JSONArray(result.paths))
         is SyncResult.Choose -> JSONObject().put("type", "choose").put("choices", JSONArray(result.choices.map(::encode)))
         is SyncResult.Failed -> JSONObject().put("type", "failed").put("problem", result.problem.name).put("detail", result.detail)
+        SyncResult.Cancelled -> JSONObject().put("type", "cancelled")
     }
 
     private fun decode(json: JSONObject): SyncResult = when (val type = json.getString("type")) {
@@ -101,6 +102,7 @@ class SyncRecords(private val dir: File) {
         "conflictAhead" -> SyncResult.ConflictAhead(json.getJSONArray("paths").strings())
         "choose" -> SyncResult.Choose(json.getJSONArray("choices").objects().map(::decodeChoice))
         "failed" -> SyncResult.Failed(Problem.valueOf(json.getString("problem")), json.getString("detail"))
+        "cancelled" -> SyncResult.Cancelled
         else -> throw IllegalArgumentException("Unknown sync result $type")
     }
 

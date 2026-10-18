@@ -132,6 +132,7 @@ private fun Repos(services: Services, onAdd: () -> Unit, onAbout: () -> Unit) {
         rows = repos?.map { RepoRow(it, states[it.id], services.signIn.canSignInAgain(it.url, account), pending[it.id]) } ?: return,
         onSync = services.syncer::sync,
         onAdd = onAdd,
+        onCancel = services.syncer::cancel,
         onSignIn = services.signIn::signInAgain,
         onAuto = { repo, auto ->
             val granted = Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
@@ -142,6 +143,7 @@ private fun Repos(services: Services, onAdd: () -> Unit, onAbout: () -> Unit) {
         onAbout = onAbout,
         all = all,
         onSyncAll = services.syncer::syncAll,
+        onCancelAll = services.syncer::cancelAll,
         onCloseAll = services.syncer::closeAll,
         header = {
             AccountCard(

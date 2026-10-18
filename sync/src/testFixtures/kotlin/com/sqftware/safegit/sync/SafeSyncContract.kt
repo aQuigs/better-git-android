@@ -10,6 +10,12 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
 import java.io.File
+import java.io.IOException
+import java.net.InetAddress
+import java.net.ServerSocket
+import java.net.Socket
+import java.util.concurrent.CopyOnWriteArrayList
+import kotlin.concurrent.thread
 import kotlin.time.Duration.Companion.days
 
 /**
@@ -546,6 +552,66 @@ abstract class SafeSyncContract(tempParent: File? = null, workTreeParent: File? 
         laptopPull()
         assertEquals("from the phone", laptop.read("phone.md"))
         assertEquals("from the laptop", files.read("laptop.md"))
+    }
+
+    @Test
+    fun aCancelStopsAFetchThatHangsAndTheNextSyncPushesTheWork() {
+        files.write("phone.md", "from the phone")
+        val cancellation = Cancellation()
+        // A remote that takes the connection and never answers, as a dead network can
+        val hanging = ServerSocket(0, 1, InetAddress.getByName("127.0.0.1"))
+        val connections = CopyOnWriteArrayList<Socket>()
+        thread {
+            while (true) {
+                connections += try { hanging.accept() } catch (_: IOException) { break }
+                cancellation.cancel()
+            }
+        }
+        val url = phoneGit("remote", "get-url", "origin")
+        phoneGit("remote", "set-url", "origin", "http://127.0.0.1:${hanging.localPort}/remote.git")
+
+        try {
+            assertEquals(SyncResult.Cancelled, sync(cancellation = cancellation))
+        } finally {
+            hanging.close()
+            connections.forEach(Socket::close)
+        }
+
+        assertEquals("Changes from Pixel", phoneGit("log", "-1", "--format=%s"))
+        phoneGit("remote", "set-url", "origin", url)
+        assertEquals(SyncResult.Synced(pulled = 0, pushed = 1), sync())
+        laptopPull()
+        assertEquals("from the phone", laptop.read("phone.md"))
+    }
+
+    @Test
+    fun aCancelWhileTheFolderMovesLetsTheMoveFinish() {
+        laptop.write("laptop.md", "from the laptop")
+        laptop.commitAndPush("laptop work")
+        files.write("phone.md", "from the phone")
+        val cancellation = Cancellation()
+        val cancelsMidMove = git.beforeFirst({ "checkout-index" in it }, cancellation::cancel)
+
+        assertEquals(SyncResult.Cancelled, sync(cancelsMidMove, cancellation = cancellation))
+
+        assertEquals("from the laptop", files.read("laptop.md"))
+        assertEquals("", phoneGit("status", "--porcelain"))
+        assertEquals("", phoneGit("for-each-ref", "refs/safegit/move-from", "refs/safegit/move-to"))
+        assertEquals(SyncResult.Synced(pulled = 0, pushed = 1), sync())
+        laptopPull()
+        assertEquals("from the phone", laptop.read("phone.md"))
+    }
+
+    @Test
+    fun aSyncCancelledBeforeItStartsDoesNothing() {
+        files.write("phone.md", "from the phone")
+        val head = phoneGit("rev-parse", "HEAD")
+        val cancellation = Cancellation().apply { cancel() }
+
+        assertEquals(SyncResult.Cancelled, sync(cancellation = cancellation))
+
+        assertEquals(head, phoneGit("rev-parse", "HEAD"))
+        assertEquals("?? phone.md", phoneGit("status", "--porcelain"))
     }
 
     @Test
@@ -1485,7 +1551,8 @@ abstract class SafeSyncContract(tempParent: File? = null, workTreeParent: File? 
         attended: Boolean = true,
         step: (Step) -> Unit = {},
         now: Long = 1000,
-    ) = SafeSync(git, PHONE, device = "Pixel", now = { now }).sync(repo, choices = choices, attended = attended, step = step)
+        cancellation: Cancellation = Cancellation(),
+    ) = SafeSync(git, PHONE, device = "Pixel", now = { now }).sync(repo, choices = choices, attended = attended, cancellation = cancellation, step = step)
 
     /** Syncs local work onto new remote work, so the sync replaces the local commit and backs it up. */
     private fun syncReplacingLocalCommits(now: Long) {

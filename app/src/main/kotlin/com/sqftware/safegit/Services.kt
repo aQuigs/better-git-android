@@ -23,9 +23,9 @@ import com.sqftware.safegit.sync.PendingChanges
 import com.sqftware.safegit.work.NotificationBoard
 import com.sqftware.safegit.work.Outgoing
 import com.sqftware.safegit.work.RepoLocks
+import com.sqftware.safegit.work.RunningSyncs
 import com.sqftware.safegit.work.SyncNotices
 import com.sqftware.safegit.work.SyncRecords
-import com.sqftware.safegit.work.SyncSteps
 import com.sqftware.safegit.work.Syncer
 import com.sqftware.safegit.work.WorkSyncer
 import kotlinx.coroutines.CoroutineScope
@@ -57,10 +57,10 @@ class Services private constructor(context: Context) {
         scope,
     )
     val accountRepos = AccountRepos(GitHubRepoDirectory(signIn::token), signIn.state.map { it is SignIn.State.SignedIn }, scope)
-    val steps = SyncSteps()
+    val running = RunningSyncs()
     val schedule = AutoSchedule(WorkManager.getInstance(context))
     val notices = SyncNotices(syncs, NotificationBoard(context))
-    val syncer: Syncer = WorkSyncer(context, repos, records, steps, schedule, scope)
+    val syncer: Syncer = WorkSyncer(context, repos, records, running, schedule, scope)
     val locks = RepoLocks()
     val outgoing = Outgoing(repos, { synchronized(locks.of(it.id)) { PendingChanges(git).of(repo(it)) } }, scope)
 

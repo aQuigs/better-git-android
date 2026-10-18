@@ -18,7 +18,7 @@ import java.nio.file.attribute.BasicFileAttributes
  * Git writes both versions of every changed file to private staging first. Each file then reaches the folder by an
  * atomic rename, after a last check that it still holds the old version, so it is always wholly old or wholly new. If
  * a write fails the moved files go back. refs/safegit/move-from and move-to record a move until the branch has
- * followed, so after a kill the next sync finishes it or puts it back.
+ * followed, so after a kill the next sync finishes it or puts it back. A cancel waits for a move to end.
  *
  * Shared storage is case-insensitive, so a file only counts as some version when its own name matches exactly. A name
  * that opens a file under another case is taken, unless the two names are one file being renamed by case. Git with
@@ -45,20 +45,20 @@ internal class FolderUpdate(private val git: RepoGit) {
      * Deals with a move a killed sync left recorded: finished once the branch has moved, redone or put back while it
      * has not. Returns a failure only when the folder could not be put right.
      */
-    fun resume(): Result.WriteFailed? {
+    fun resume(): Result.WriteFailed? = git.cancellation.shielded {
         temp.delete()
-        val from = git.resolve(FROM) ?: return null
+        val from = git.resolve(FROM) ?: return@shielded null
         val to = git.resolve(TO)
         if (to == null || (git.head() ?: git.emptyTree) != from) {
             finish()
-            return null
+            return@shielded null
         }
-        return Move(from, to).run(resuming = true) as? Result.WriteFailed
+        Move(from, to).run(resuming = true) as? Result.WriteFailed
     }
 
-    fun move(from: String, to: String): Result {
+    fun move(from: String, to: String): Result = git.cancellation.shielded {
         git.check("update-ref", "--stdin", input = "update $FROM $from\nupdate $TO $to\n")
-        return Move(from, to).run(resuming = false)
+        Move(from, to).run(resuming = false)
     }
 
     private fun finish() {

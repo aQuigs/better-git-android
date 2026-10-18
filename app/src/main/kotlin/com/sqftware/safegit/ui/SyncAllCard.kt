@@ -9,6 +9,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -24,7 +25,7 @@ import com.sqftware.safegit.work.SyncState
 
 /** Syncs every repo, one after another, and sums up [all], the last such sync, with the repos named as in [rows]. */
 @Composable
-fun SyncAllCard(rows: List<RepoRow>, all: AllRun?, onSyncAll: () -> Unit, onClose: () -> Unit) {
+fun SyncAllCard(rows: List<RepoRow>, all: AllRun?, onSyncAll: () -> Unit, onCancel: () -> Unit, onClose: () -> Unit) {
     val going = all?.going == true
 
     Card(Modifier.fillMaxWidth().padding(bottom = 12.dp)) {
@@ -50,6 +51,7 @@ fun SyncAllCard(rows: List<RepoRow>, all: AllRun?, onSyncAll: () -> Unit, onClos
 
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                 Button(onClick = onSyncAll, enabled = !going) { Text(stringResource(R.string.sync_all)) }
+                if (going) OutlinedButton(onClick = onCancel) { Text(stringResource(R.string.cancel)) }
                 if (all != null && !going) TextButton(onClick = onClose) { Text(stringResource(R.string.all_close)) }
             }
         }
@@ -65,6 +67,7 @@ private fun RunOutcome(result: SyncResult?, going: Boolean, running: Boolean) {
         is SyncResult.Conflict, is SyncResult.ConflictAhead -> R.string.all_conflict
         is SyncResult.Choose -> R.string.all_choose
         is SyncResult.Failed -> R.string.all_failed
+        SyncResult.Cancelled -> R.string.all_cancelled
         null -> when {
             !going -> R.string.all_not_run
             running -> R.string.state_running
