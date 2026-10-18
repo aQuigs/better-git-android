@@ -33,7 +33,7 @@ for n in re.findall(r'<node [^>]*>', sys.stdin.read()):
         x1,y1,x2,y2=map(int,re.search(r'bounds=\"\[(\d+),(\d+)\]\[(\d+),(\d+)\]\"',n).groups()); print((x1+x2)//2,(y1+y2)//2); break
 " "$1" "${2:-1}"
 }
-tap() { local at; at=$(center "$1" "${2:-1}"); [ -n "$at" ] || fail "no '$1' on screen"; adb shell input tap $at; sleep 1; }
+tap() { local at; at=$(center "$@"); [ -n "$at" ] || fail "no '$1' on screen"; adb shell input tap $at; sleep 1; }
 # Runs the command after the message until it succeeds, for at most WITHIN seconds
 within() { local why=$1; shift; local end=$((SECONDS + ${WITHIN:-60})); until "$@"; do [ $SECONDS -lt $end ] || fail "$why"; sleep 1; done; }
 shown() { [ -n "$(center "$1")" ]; }

@@ -32,6 +32,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
@@ -61,7 +62,6 @@ import com.sqftware.safegit.sync.Step
 import com.sqftware.safegit.sync.SyncResult
 import com.sqftware.safegit.work.AllRun
 import com.sqftware.safegit.work.SyncState
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
 /**
@@ -342,13 +342,16 @@ private fun Paths(explanation: String, paths: List<String>) {
 private fun Choices(choices: List<Choice>, kept: MutableMap<Choice, Keep>, onSync: (Map<Choice, Keep>) -> Unit, preview: (Choice) -> ChoicePreview?) {
     Text(stringResource(R.string.state_choose))
     for (choice in choices) {
-        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text(choice.path, fontFamily = FontFamily.Monospace)
-            val shown by produceState<ChoicePreview?>(null, choice) { value = withContext(Dispatchers.IO) { preview(choice) } }
-            shown?.let { ChoicePreviewView(it) } ?: Text(sides(choice), style = MaterialTheme.typography.bodySmall)
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                FilterChip(kept[choice] == Keep.LOCAL, onClick = { kept[choice] = Keep.LOCAL }, label = { Text(stringResource(R.string.keep_local)) })
-                FilterChip(kept[choice] == Keep.REMOTE, onClick = { kept[choice] = Keep.REMOTE }, label = { Text(stringResource(R.string.keep_remote)) })
+        // Keyed, so another choice's preview never shows over this one's chips while this one's loads
+        key(choice) {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(choice.path, fontFamily = FontFamily.Monospace)
+                val shown by produceState<ChoicePreview?>(null) { value = withContext(previewing) { preview(choice) } }
+                shown?.let { ChoicePreviewView(it) } ?: Text(sides(choice), style = MaterialTheme.typography.bodySmall)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    FilterChip(kept[choice] == Keep.LOCAL, onClick = { kept[choice] = Keep.LOCAL }, label = { Text(stringResource(R.string.keep_local)) })
+                    FilterChip(kept[choice] == Keep.REMOTE, onClick = { kept[choice] = Keep.REMOTE }, label = { Text(stringResource(R.string.keep_remote)) })
+                }
             }
         }
     }

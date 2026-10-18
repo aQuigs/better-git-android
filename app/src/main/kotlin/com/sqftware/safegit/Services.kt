@@ -79,7 +79,7 @@ class Services private constructor(context: Context) {
 
     /** Null when it cannot be read, as the choice can still be made by its path alone. */
     fun preview(saved: SavedRepo, choice: Choice): ChoicePreview? = try {
-        ChoicePreviews(git).of(repo(saved), choice)
+        ChoicePreviews(git, repo(saved)).of(choice)
     } catch (_: Exception) {
         null
     }

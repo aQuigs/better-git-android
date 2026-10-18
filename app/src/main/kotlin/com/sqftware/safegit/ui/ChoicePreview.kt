@@ -1,10 +1,12 @@
 package com.sqftware.safegit.ui
 
+import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.text.format.Formatter
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -62,7 +64,7 @@ private fun SideView(name: String, color: Color, version: Version, diffed: Boole
             is Version.Folder -> Text(pluralStringResource(R.plurals.preview_folder, version.files, version.files), style = small)
             is Version.Binary -> Text(stringResource(R.string.preview_file, size(version.size)), style = small)
             is Version.Elsewhere -> Text(stringResource(R.string.preview_elsewhere, version.id.take(SHORT_ID)), style = small)
-            is Version.Image -> Thumbnail(name, version.bytes)
+            is Version.Image -> Thumbnail(name, version)
             is Version.Text -> if (diffed) {
                 Text(pluralStringResource(R.plurals.preview_lines, version.total, version.total), style = small)
             } else {
@@ -96,27 +98,52 @@ private fun Diff(diff: List<DiffLine>) {
     }
 }
 
-/** Decoded small, off the main thread, since a photo can be many megabytes; one that will not decode shows its size. */
+/**
+ * Read and decoded off the main thread, keeping only a thumbnail, since a photo can be many megabytes and a choice can
+ * hold many; one that will not decode shows its size.
+ */
 @Composable
-private fun Thumbnail(name: String, bytes: ByteArray) {
-    val image by produceState<ImageBitmap?>(null, bytes) { value = withContext(Dispatchers.Default) { decode(bytes) } }
-    val decoded = image
-    if (decoded == null) {
-        Text(stringResource(R.string.preview_file, size(bytes.size.toLong())), style = MaterialTheme.typography.bodySmall)
-    } else {
-        Image(decoded, stringResource(R.string.preview_image, name), Modifier.size(THUMBNAIL.dp), contentScale = ContentScale.Fit)
+private fun Thumbnail(name: String, image: Version.Image) {
+    val thumbnail by produceState<Thumbnail>(Thumbnail.Loading, image) { value = withContext(previewing) { thumbnail(image) } }
+    when (val shown = thumbnail) {
+        Thumbnail.Loading -> Box(Modifier.size(THUMBNAIL.dp))
+        Thumbnail.Unreadable -> Text(stringResource(R.string.preview_file, size(image.size)), style = MaterialTheme.typography.bodySmall)
+        is Thumbnail.Shown -> Image(shown.bitmap, stringResource(R.string.preview_image, name), Modifier.size(THUMBNAIL.dp), contentScale = ContentScale.Fit)
     }
 }
 
-private fun decode(bytes: ByteArray): ImageBitmap? {
+private sealed interface Thumbnail {
+    data object Loading : Thumbnail
+
+    data object Unreadable : Thumbnail
+
+    class Shown(val bitmap: ImageBitmap) : Thumbnail
+}
+
+private fun thumbnail(image: Version.Image): Thumbnail = try {
+    val bytes = image.read()
     val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
     BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
-    if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
     var sample = 1
     while (maxOf(bounds.outWidth, bounds.outHeight) / (sample * 2) >= THUMBNAIL_PIXELS) sample *= 2
-    val options = BitmapFactory.Options().apply { inSampleSize = sample }
-    return BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options)?.asImageBitmap()
+    val decoded = BitmapFactory.decodeByteArray(bytes, 0, bytes.size, BitmapFactory.Options().apply { inSampleSize = sample })
+    decoded?.let { Thumbnail.Shown(scaled(it).asImageBitmap()) } ?: Thumbnail.Unreadable
+} catch (_: Exception) {
+    Thumbnail.Unreadable
+} catch (_: OutOfMemoryError) {
+    // A huge image that a busy app cannot decode is shown by its size, rather than taking the app down
+    Thumbnail.Unreadable
 }
+
+/** Down to the thumbnail's own size: sampling alone leaves up to twice it on a side. */
+private fun scaled(bitmap: Bitmap): Bitmap {
+    val scale = THUMBNAIL_PIXELS.toFloat() / maxOf(bitmap.width, bitmap.height)
+    if (scale >= 1) return bitmap
+    return Bitmap.createScaledBitmap(bitmap, (bitmap.width * scale).toInt().coerceAtLeast(1), (bitmap.height * scale).toInt().coerceAtLeast(1), true)
+}
+
+/** Previews and thumbnails load two at a time, so a choice of many files never runs a git or holds a photo for each at once. */
+internal val previewing = Dispatchers.IO.limitedParallelism(2)
 
 @Composable
 private fun size(bytes: Long) = Formatter.formatShortFileSize(LocalContext.current, bytes)
@@ -126,5 +153,5 @@ private fun sideColor(side: Keep) = if (side == Keep.LOCAL) MaterialTheme.colorS
 
 private const val SHORT_ID = 7
 private const val THUMBNAIL = 96
-private const val THUMBNAIL_PIXELS = 384
+private const val THUMBNAIL_PIXELS = 288
 private const val DIFF_HEIGHT = 240

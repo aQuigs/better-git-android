@@ -3,11 +3,11 @@ package com.sqftware.safegit.ui
 import android.graphics.Bitmap
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsEnabled
-import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.hasSetTextAction
@@ -251,7 +251,7 @@ class ReposScreenTest {
         val notes = Choice("notes.md", local = "d4", remote = "e5")
         val folder = Choice("drafts", local = "f6", remote = "0123456789")
         val previews = mapOf(
-            photo to ChoicePreview(Version.Image(png()), Version.Binary(2048)),
+            photo to ChoicePreview(Version.Image(100) { png() }, Version.Binary(2048)),
             deleted to ChoicePreview(Version.Text(listOf("phone's note"), 3), Version.Deleted),
             notes to ChoicePreview(
                 Version.Text(listOf("one", "phone"), 2),

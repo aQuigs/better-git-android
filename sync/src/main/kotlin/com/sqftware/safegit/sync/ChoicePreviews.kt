@@ -8,94 +8,97 @@ sealed interface Version {
 
     data class Folder(val files: Int) : Version
 
-    /** A text file's first [lines], of [total]. */
+    /** A text file's first [lines], each cut short if long, of [total]. */
     data class Text(val lines: List<String>, val total: Int) : Version
 
-    /** A file named as an image, for a thumbnail; one that will not decode is shown by its size. */
-    class Image(val bytes: ByteArray) : Version
+    /**
+     * A file named as an image, of [size] bytes. [read] gets its bytes only once a thumbnail is shown, so a choice of
+     * many photos never holds them all.
+     */
+    class Image(val size: Long, val read: () -> ByteArray) : Version
 
     data class Binary(val size: Long) : Version
 
-    /** An object this repo does not hold, such as a submodule's commit or a file inside one, kept in its own repo. */
+    /** An object this repo does not hold: a submodule's commit, or a file inside one, which its own repo keeps. */
     data class Elsewhere(val id: String) : Version
 }
 
-/** A line of the two sides' difference: in both, or only on [side]'s. A null line marks a gap between the parts shown. */
+/** A line of the two sides' difference: in both, or only on [side]'s. A null line marks lines left out. */
 data class DiffLine(val side: Keep?, val text: String?)
 
 /** Both sides of a choice, and where both are text, how they differ. */
 data class ChoicePreview(val local: Version, val remote: Version, val diff: List<DiffLine> = emptyList())
 
-/** Reads what each side of a choice holds, from objects the sync that asked it left in the repo. */
-class ChoicePreviews(private val git: Git) {
-    fun of(repo: Repo, choice: Choice): ChoicePreview {
-        val git = RepoGit(git, repo, NOBODY)
-        val local = version(git, choice.path, choice.local)
-        val remote = version(git, choice.path, choice.remote)
-        val diff = if (local is Version.Text && remote is Version.Text) diff(git, choice.remote!!, choice.local!!) else emptyList()
+/** Reads what each side of a choice in [repo] holds, from objects the sync that asked it left there. */
+class ChoicePreviews(git: Git, repo: Repo) {
+    private val git = RepoGit(git, repo, NOBODY)
+
+    fun of(choice: Choice): ChoicePreview {
+        val objects = objects(listOfNotNull(choice.local, choice.remote))
+        val local = version(choice.path, choice.local, objects)
+        val remote = version(choice.path, choice.remote, objects)
+        val diff = if (local is Version.Text && remote is Version.Text) diff(choice.remote!!, choice.local!!) else emptyList()
         return ChoicePreview(local, remote, diff)
     }
 
-    private fun version(git: RepoGit, path: String, id: String?): Version {
+    /** Each object's type and size by id, leaving out those this repo lacks, which git reports as "<id> missing". */
+    private fun objects(ids: List<String>): Map<String, Pair<String, Long>> {
+        val found = git.check("cat-file", "--batch-check=%(objectname) %(objecttype) %(objectsize)", input = ids.joinToString("") { "$it\n" })
+        return found.stdout.lines().map { it.split(' ') }.filter { it.size == 3 }.associate { (id, type, size) -> id to (type to size.toLong()) }
+    }
+
+    private fun version(path: String, id: String?, objects: Map<String, Pair<String, Long>>): Version {
         id ?: return Version.Deleted
-        // Missing is no failure here: a submodule's objects live in its own git dir
-        val type = git.run("cat-file", "-t", id).takeIf { it.ok }?.stdout?.trim() ?: return Version.Elsewhere(id)
+        val (type, size) = objects[id] ?: return Version.Elsewhere(id)
         return when (type) {
-            "tree" -> Version.Folder(git.check("ls-tree", "-r", "-z", "--name-only", id).stdout.paths().size)
-            "blob" -> blob(git, path, id)
+            "tree" -> Version.Folder(git.check("ls-tree", "-r", "-z", "--name-only", id).stdout.count { it == '\u0000' })
+            "blob" -> blob(path, id, size)
             else -> Version.Elsewhere(id)
         }
     }
 
-    private fun blob(git: RepoGit, path: String, id: String): Version {
-        val size = git.check("cat-file", "-s", id).stdout.trim().toLong()
-        if (path.substringAfterLast('.').lowercase() in IMAGES && size <= MAX_IMAGE) return Version.Image(bytes(git, id))
+    private fun blob(path: String, id: String, size: Long): Version {
+        if (path.substringAfterLast('.').lowercase() in IMAGES && size <= MAX_IMAGE) {
+            return Version.Image(size) { git.check("cat-file", "blob", id).bytes }
+        }
         if (size > MAX_TEXT) return Version.Binary(size)
 
-        val text = git.check("cat-file", "blob", id).stdout
+        val bytes = git.check("cat-file", "blob", id).bytes
         // Git's own test for a binary file
-        if ('\u0000' in text.take(BINARY_PROBE)) return Version.Binary(size)
-        val lines = text.lines().let { if (text.endsWith("\n")) it.dropLast(1) else it }
-        return Version.Text(lines.take(SHOWN_LINES), lines.size)
+        if ((0 until minOf(bytes.size, BINARY_PROBE)).any { bytes[it] == ZERO }) return Version.Binary(size)
+        val text = bytes.decodeToString()
+        val total = text.count { it == '\n' } + if (text.isEmpty() || text.endsWith('\n')) 0 else 1
+        return Version.Text(text.splitToSequence('\n').take(minOf(total, SHOWN_LINES)).map(::cut).toList(), total)
     }
 
-    /** Git's output reaches us as text, so the file's bytes are written to private storage and read from there. */
-    private fun bytes(git: RepoGit, id: String): ByteArray {
-        val scratch = git.repo.gitDir.resolve("safegit-preview").apply { mkdirs() }
-        val file = scratch.resolve(
-            git.cli.run(scratch, listOf("--git-dir=${git.repo.gitDir.path}", "--work-tree=${scratch.path}", "unpack-file", id))
-                .also { if (!it.ok) throw GitFailure("unpack-file", it) }
-                .stdout.trim(),
-        )
-        try {
-            return file.readBytes()
-        } finally {
-            file.delete()
-        }
-    }
-
-    private fun diff(git: RepoGit, from: String, to: String): List<DiffLine> {
-        val lines = git.check("diff", "--no-color", "--no-ext-diff", "-U$CONTEXT", from, to).stdout.lines()
-        val diff = lines.dropWhile { !it.startsWith("@@") }.mapNotNull { line ->
+    private fun diff(from: String, to: String): List<DiffLine> {
+        val lines = git.check("diff", "--no-color", "--no-ext-diff", "-U$CONTEXT", from, to, "--").stdout.split('\n')
+        // The first hunk's header opens the diff; each later one marks lines left out
+        val diff = lines.dropWhile { !it.startsWith("@@") }.drop(1).mapNotNull { line ->
             when (line.firstOrNull()) {
                 '@' -> DiffLine(null, null)
-                '-' -> DiffLine(Keep.REMOTE, line.drop(1))
-                '+' -> DiffLine(Keep.LOCAL, line.drop(1))
-                ' ' -> DiffLine(null, line.drop(1))
+                '-' -> DiffLine(Keep.REMOTE, cut(line.drop(1)))
+                '+' -> DiffLine(Keep.LOCAL, cut(line.drop(1)))
+                ' ' -> DiffLine(null, cut(line.drop(1)))
                 // "\ No newline at end of file", and the empty string after the last line
                 else -> null
             }
-        }.drop(1)
+        }
         return if (diff.size > SHOWN_DIFF) diff.take(SHOWN_DIFF) + DiffLine(null, null) else diff
     }
 
+    // A minified file can be one line of a megabyte, too long to lay out
+    private fun cut(line: String) = line.removeSuffix("\r").let { if (it.length > MAX_LINE) it.take(MAX_LINE) + "…" else it }
+
     private companion object {
         val IMAGES = setOf("png", "jpg", "jpeg", "gif", "webp", "bmp", "heic", "heif")
-        const val MAX_IMAGE = 10L shl 20
+        const val MAX_IMAGE = 20L shl 20
         const val MAX_TEXT = 1L shl 20
         const val BINARY_PROBE = 8000
+        const val ZERO: Byte = 0
         const val SHOWN_LINES = 8
         const val SHOWN_DIFF = 200
+        const val MAX_LINE = 300
         const val CONTEXT = 2
     }
 }

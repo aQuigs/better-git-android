@@ -38,12 +38,12 @@ class CliGit(private val executable: String, private val environment: Map<String
             }
             // A stopped git's streams are closed under their readers, which Android fails rather than ends; uncaught, a
             // read's failure would crash the app, and ignored, it would read as git saying nothing
-            val output = arrayOf("", "")
+            val output = arrayOf(ByteArray(0), ByteArray(0))
             var failure: IOException? = null
             val readers = listOf(process.inputStream, process.errorStream).mapIndexed { i, stream ->
                 thread {
                     try {
-                        output[i] = stream.bufferedReader().readText()
+                        output[i] = stream.readBytes()
                     } catch (e: IOException) {
                         failure = e
                     }
@@ -59,7 +59,7 @@ class CliGit(private val executable: String, private val environment: Map<String
             writer?.join()
             failure?.let { throw it }
 
-            return GitResult(exitCode, output[0], output[1])
+            return GitResult(exitCode, output[0], output[1].decodeToString())
         } finally {
             process.destroy()
         }

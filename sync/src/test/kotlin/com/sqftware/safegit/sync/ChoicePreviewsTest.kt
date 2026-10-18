@@ -15,7 +15,6 @@ class ChoicePreviewsTest {
     val temp = TemporaryFolder()
 
     private val git = CliGit("git")
-    private val previews = ChoicePreviews(git)
     private lateinit var remote: File
     private lateinit var phone: Repo
 
@@ -35,12 +34,12 @@ class ChoicePreviewsTest {
 
         val choice = (sync() as SyncResult.Choose).choices.single()
 
-        assertEquals(ChoicePreview(Version.Deleted, Version.Text(listOf("one", "laptop"), 2)), previews.of(phone, choice))
+        assertEquals(ChoicePreview(Version.Deleted, Version.Text(listOf("one", "laptop"), 2)), previewOf(choice))
     }
 
     @Test
     fun diffsTwoTextsByWhichSideHasEachLine() {
-        val preview = previews.of(phone, Choice("notes.md", blob("one\nphone\nthree\n"), blob("one\nremote\nthree\n")))
+        val preview = previewOf(Choice("notes.md", blob("one\nphone\nthree\n"), blob("one\nremote\nthree\n")))
 
         val diff = listOf(DiffLine(null, "one"), DiffLine(Keep.REMOTE, "remote"), DiffLine(Keep.LOCAL, "phone"), DiffLine(null, "three"))
         assertEquals(diff, preview.diff)
@@ -50,7 +49,7 @@ class ChoicePreviewsTest {
     fun marksTheGapsBetweenThePartsShown() {
         val lines = (1..20).map { "line $it" }
         val phoneText = lines.toMutableList().apply { this[0] = "phone"; this[19] = "phone" }
-        val preview = previews.of(phone, Choice("notes.md", blob(phoneText.joinToString("\n", postfix = "\n")), blob(lines.joinToString("\n", postfix = "\n"))))
+        val preview = previewOf(Choice("notes.md", blob(phoneText.joinToString("\n", postfix = "\n")), blob(lines.joinToString("\n", postfix = "\n"))))
 
         assertEquals(1, preview.diff.count { it.text == null })
         assertEquals(DiffLine(Keep.LOCAL, "phone"), preview.diff.last())
@@ -60,18 +59,31 @@ class ChoicePreviewsTest {
     fun readsAnImagesBytes() {
         val png = byteArrayOf(0x89.toByte(), 'P'.code.toByte(), 'N'.code.toByte(), 'G'.code.toByte(), 0, 1, 2, 0xff.toByte())
 
-        val local = previews.of(phone, Choice("photo.PNG", blob(png), null)).local
+        val local = previewOf(Choice("photo.PNG", blob(png), null)).local
 
-        assertArrayEquals(png, (local as Version.Image).bytes)
-        assertTrue(phone.gitDir.resolve("safegit-preview").list()!!.isEmpty())
+        assertArrayEquals(png, (local as Version.Image).read())
     }
 
     @Test
     fun givesTheSizeOfOtherBinaryFiles() {
-        val preview = previews.of(phone, Choice("data.bin", blob(byteArrayOf(1, 0, 2)), blob("text\n")))
+        val preview = previewOf(Choice("data.bin", blob(byteArrayOf(1, 0, 2)), blob("text\n")))
 
         assertEquals(Version.Binary(3), preview.local)
         assertTrue(preview.diff.isEmpty())
+    }
+
+    @Test
+    fun cutsLongLinesAndSplitsOnlyOnNewlines() {
+        val long = "x".repeat(1_000)
+
+        val local = previewOf(Choice("app.js", blob("$long\na\rb"), blob(""))).local
+
+        assertEquals(Version.Text(listOf("x".repeat(300) + "…", "a\rb"), 2), local)
+    }
+
+    @Test
+    fun countsNoLinesInAnEmptyFile() {
+        assertEquals(Version.Text(emptyList(), 0), previewOf(Choice("empty.md", blob(""), null)).local)
     }
 
     @Test
@@ -79,14 +91,14 @@ class ChoicePreviewsTest {
         val inner = phoneGit("mktree", input = "100644 blob ${blob("b\n")}\tb.md\n").stdout.trim()
         val folder = phoneGit("mktree", input = "100644 blob ${blob("a\n")}\ta.md\n040000 tree $inner\tinner\n").stdout.trim()
 
-        assertEquals(Version.Folder(2), previews.of(phone, Choice("notes", folder, null)).local)
+        assertEquals(Version.Folder(2), previewOf(Choice("notes", folder, null)).local)
     }
 
     @Test
     fun leavesAnObjectFromAnotherRepoUnread() {
         val commit = "0123456789abcdef0123456789abcdef01234567"
 
-        assertEquals(Version.Elsewhere(commit), previews.of(phone, Choice("lib", commit, null)).local)
+        assertEquals(Version.Elsewhere(commit), previewOf(Choice("lib", commit, null)).local)
     }
 
     private fun blob(text: String) = phoneGit("hash-object", "-w", "--stdin", input = text).stdout.trim()
@@ -100,9 +112,10 @@ class ChoicePreviewsTest {
 
     private fun phoneGit(vararg args: String, input: String = "") = RepoGit(git, phone, PHONE).check(*args, input = input)
 
+    private fun previewOf(choice: Choice) = ChoicePreviews(git, phone).of(choice)
+
     private fun laptop(edit: File.() -> Unit) {
-        val laptop = temp.root.resolve("laptop").takeIf { it.exists() }?.also { git.ok(it, "pull", "-q") }
-            ?: temp.newFolder("laptop").also { git.ok(it, "clone", "-q", remote.path, ".") }
+        val laptop = temp.newFolder("laptop").also { git.ok(it, "clone", "-q", remote.path, ".") }
         laptop.edit()
         git.ok(laptop, "add", "--all")
         git.ok(laptop, "commit", "-q", "-m", "laptop")
