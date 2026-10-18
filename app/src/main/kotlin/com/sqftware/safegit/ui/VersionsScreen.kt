@@ -117,7 +117,8 @@ private fun VersionCard(
     Card(Modifier.fillMaxWidth().padding(bottom = 8.dp).clickable(enabled = opens) { open = !open }) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text(madeAt(version), Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
+                Text(madeAt(version), style = MaterialTheme.typography.bodySmall)
+                Text(version.commit.take(SHORT_SHA), Modifier.weight(1f), fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall)
                 if (current) Text(stringResource(R.string.versions_current), color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelMedium)
             }
             Text(
@@ -148,3 +149,5 @@ private fun madeAt(version: PastVersion) = DateUtils.formatDateTime(
     version.time,
     DateUtils.FORMAT_SHOW_DATE or DateUtils.FORMAT_SHOW_TIME or DateUtils.FORMAT_SHOW_YEAR or DateUtils.FORMAT_ABBREV_MONTH,
 )
+
+private const val SHORT_SHA = 7

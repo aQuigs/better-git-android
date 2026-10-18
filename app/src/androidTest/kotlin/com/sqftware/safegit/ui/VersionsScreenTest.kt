@@ -36,6 +36,7 @@ class VersionsScreenTest {
         compose.setContent { VersionsScreen("notes/day.md", versions, preview = { preview }, onRestore = {}) }
 
         compose.onNodeWithText("Current").assertExists()
+        compose.onNodeWithText("aaaaaaa").assertExists()
         compose.onNodeWithText("Ann · Changes from Pixel ▾").assertExists()
         compose.onNodeWithText("Ann · Laptop edit ▾").assertExists()
         compose.onNodeWithText("Ann · Tidy up").assertExists()
