@@ -4,49 +4,67 @@
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-    <path
-        android:pathData="M40,31 V77"
-        android:strokeColor="#42A5F5"
-        android:strokeLineCap="round"
-        android:strokeWidth="4.5" />
-    <path
-        android:pathData="M40,31 C40,38 56,33 56,42 V66 C56,75 40,70 40,77"
-        android:strokeColor="#66BB6A"
-        android:strokeLineCap="round"
-        android:strokeWidth="4.5" />
-    <path
-        android:pathData="M56,42 C56,50 72,46 72,54 C72,62 56,58 56,66"
-        android:strokeColor="#FFB300"
-        android:strokeLineCap="round"
-        android:strokeWidth="4.5" />
-    <path
-        android:fillColor="@color/ic_launcher_background"
-        android:pathData="M33,31a7,7 0 1,0 14,0a7,7 0 1,0 -14,0" />
-    <path
-        android:fillColor="#42A5F5"
-        android:pathData="M35,31a5,5 0 1,0 10,0a5,5 0 1,0 -10,0" />
-    <path
-        android:fillColor="@color/ic_launcher_background"
-        android:pathData="M33,77a7,7 0 1,0 14,0a7,7 0 1,0 -14,0" />
-    <path
-        android:fillColor="#42A5F5"
-        android:pathData="M35,77a5,5 0 1,0 10,0a5,5 0 1,0 -10,0" />
-    <path
-        android:fillColor="@color/ic_launcher_background"
-        android:pathData="M49,42a7,7 0 1,0 14,0a7,7 0 1,0 -14,0" />
-    <path
-        android:fillColor="#66BB6A"
-        android:pathData="M51,42a5,5 0 1,0 10,0a5,5 0 1,0 -10,0" />
-    <path
-        android:fillColor="@color/ic_launcher_background"
-        android:pathData="M49,66a7,7 0 1,0 14,0a7,7 0 1,0 -14,0" />
-    <path
-        android:fillColor="#66BB6A"
-        android:pathData="M51,66a5,5 0 1,0 10,0a5,5 0 1,0 -10,0" />
-    <path
-        android:fillColor="@color/ic_launcher_background"
-        android:pathData="M65,54a7,7 0 1,0 14,0a7,7 0 1,0 -14,0" />
-    <path
-        android:fillColor="#FFB300"
-        android:pathData="M67,54a5,5 0 1,0 10,0a5,5 0 1,0 -10,0" />
+    <group
+        android:pivotX="54"
+        android:pivotY="54"
+        android:scaleX="0.6667"
+        android:scaleY="0.6667">
+        <path
+            android:pathData="M36,28 V82"
+            android:strokeColor="#42A5F5"
+            android:strokeLineCap="round"
+            android:strokeWidth="5" />
+        <path
+            android:pathData="M36,36 C36,44 54,40 54,48 V64 C54,72 36,70 36,78"
+            android:strokeColor="#66BB6A"
+            android:strokeLineCap="round"
+            android:strokeWidth="5" />
+        <path
+            android:pathData="M54,50 C54,42 72,44 72,52 V70"
+            android:strokeColor="#FFB300"
+            android:strokeLineCap="round"
+            android:strokeWidth="5" />
+        <path
+            android:fillColor="@color/ic_launcher_background"
+            android:pathData="M29.25,28a6.75,6.75 0 1,0 13.5,0a6.75,6.75 0 1,0 -13.5,0" />
+        <path
+            android:fillColor="#42A5F5"
+            android:pathData="M31.75,28a4.25,4.25 0 1,0 8.5,0a4.25,4.25 0 1,0 -8.5,0" />
+        <path
+            android:fillColor="@color/ic_launcher_background"
+            android:pathData="M29.25,56a6.75,6.75 0 1,0 13.5,0a6.75,6.75 0 1,0 -13.5,0" />
+        <path
+            android:fillColor="#42A5F5"
+            android:pathData="M31.75,56a4.25,4.25 0 1,0 8.5,0a4.25,4.25 0 1,0 -8.5,0" />
+        <path
+            android:fillColor="@color/ic_launcher_background"
+            android:pathData="M29.25,80a6.75,6.75 0 1,0 13.5,0a6.75,6.75 0 1,0 -13.5,0" />
+        <path
+            android:fillColor="#42A5F5"
+            android:pathData="M31.75,80a4.25,4.25 0 1,0 8.5,0a4.25,4.25 0 1,0 -8.5,0" />
+        <path
+            android:fillColor="@color/ic_launcher_background"
+            android:pathData="M47.25,48a6.75,6.75 0 1,0 13.5,0a6.75,6.75 0 1,0 -13.5,0" />
+        <path
+            android:fillColor="#66BB6A"
+            android:pathData="M49.75,48a4.25,4.25 0 1,0 8.5,0a4.25,4.25 0 1,0 -8.5,0" />
+        <path
+            android:fillColor="@color/ic_launcher_background"
+            android:pathData="M47.25,64a6.75,6.75 0 1,0 13.5,0a6.75,6.75 0 1,0 -13.5,0" />
+        <path
+            android:fillColor="#66BB6A"
+            android:pathData="M49.75,64a4.25,4.25 0 1,0 8.5,0a4.25,4.25 0 1,0 -8.5,0" />
+        <path
+            android:fillColor="@color/ic_launcher_background"
+            android:pathData="M65.25,54a6.75,6.75 0 1,0 13.5,0a6.75,6.75 0 1,0 -13.5,0" />
+        <path
+            android:fillColor="#FFB300"
+            android:pathData="M67.75,54a4.25,4.25 0 1,0 8.5,0a4.25,4.25 0 1,0 -8.5,0" />
+        <path
+            android:fillColor="@color/ic_launcher_background"
+            android:pathData="M65.25,70a6.75,6.75 0 1,0 13.5,0a6.75,6.75 0 1,0 -13.5,0" />
+        <path
+            android:fillColor="#FFB300"
+            android:pathData="M67.75,70a4.25,4.25 0 1,0 8.5,0a4.25,4.25 0 1,0 -8.5,0" />
+    </group>
 </vector>
