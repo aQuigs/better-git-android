@@ -57,6 +57,51 @@ abstract class RepoSetupContract(tempParent: File? = null, workTreeParent: File?
     }
 
     @Test
+    fun listsTheRemotesBranches() {
+        git.ok(laptop, "push", "-q", "origin", "HEAD:drafts", "HEAD:topic/idea")
+        git.ok(laptop, "tag", "v1")
+        git.ok(laptop, "push", "-q", "origin", "v1")
+        // Listed under its own name, like any branch, and once
+        git.ok(remote, "symbolic-ref", "refs/heads/alias", "refs/heads/trunk")
+
+        val branches = RepoSetup(git, LAPTOP).branches(remote.path, temp.root)
+
+        assertEquals(RepoSetup.Branches.Listed(listOf("alias", "drafts", "topic/idea", "trunk"), default = "trunk"), branches)
+    }
+
+    @Test
+    fun listsNoBranchesOfAnEmptyRemote() {
+        val empty = temp.newFolder("empty.git")
+        git.ok(empty, "init", "-q", "--bare")
+
+        assertEquals(emptyList<String>(), (RepoSetup(git, LAPTOP).branches(empty.path, temp.root) as RepoSetup.Branches.Listed).names)
+    }
+
+    @Test
+    fun failsToListTheBranchesOfARemoteOutOfReach() {
+        val branches = RepoSetup(git, LAPTOP).branches(temp.root.resolve("missing.git").path, temp.root)
+
+        assertEquals(Problem.FETCH, (branches as RepoSetup.Branches.Failed).problem)
+    }
+
+    @Test
+    fun syncsThePickedBranch() {
+        git.ok(laptop, "checkout", "-q", "-b", "drafts")
+        laptop.resolve("draft.md").writeText("only on drafts\n")
+        laptop.commitAndPush("draft")
+
+        val result = RepoSetup(git, LAPTOP).connect(remote.path, gitDir, folder, branch = "drafts") as RepoSetup.Result.Connected
+        assertEquals("drafts", result.branch)
+        folder.resolve("phone.md").writeText("from the phone\n")
+        assertEquals(SyncResult.Synced(pulled = 2, pushed = 1), sync(result.repo))
+
+        assertEquals("only on drafts\n", folder.resolve("draft.md").readText())
+        git.ok(laptop, "fetch", "-q")
+        assertEquals("from the phone\n", git.ok(laptop, "show", "origin/drafts:phone.md") + "\n")
+        assertFalse(git.run(laptop, listOf("cat-file", "-e", "origin/trunk:phone.md")).ok)
+    }
+
+    @Test
     fun setsTheCaseRulesOfTheFoldersStorage() {
         val repo = connect()
 

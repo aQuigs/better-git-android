@@ -14,6 +14,7 @@ import com.sqftware.safegit.repos.AccountRepos
 import com.sqftware.safegit.repos.Connector
 import com.sqftware.safegit.repos.FileRepoStore
 import com.sqftware.safegit.repos.GitHubRepoDirectory
+import com.sqftware.safegit.repos.RemoteBranches
 import com.sqftware.safegit.repos.RepoStore
 import com.sqftware.safegit.repos.SavedRepo
 import com.sqftware.safegit.sync.Identity
@@ -35,7 +36,13 @@ import kotlinx.coroutines.flow.map
 
 /** What the app's parts share, built once per process. */
 class Services private constructor(context: Context) {
-    val repos: RepoStore = FileRepoStore(context.filesDir.resolve("repos.json"))
+    // Kept out of backups: a git dir can be large, and the remote has it all
+    private val gitDirs = context.noBackupFilesDir.resolve("repos")
+
+    // HEAD holds "ref: refs/heads/<branch>" while on one, as a sync always leaves it; the card shows no branch otherwise
+    val repos: RepoStore = FileRepoStore(context.filesDir.resolve("repos.json")) { id ->
+        gitDir(id).resolve("HEAD").takeIf { it.isFile }?.readText()?.trim()?.takeIf { it.startsWith(HEAD_BRANCH) }?.removePrefix(HEAD_BRANCH).orEmpty()
+    }
     private val syncs = context.filesDir.resolve("syncs")
     val records = SyncRecords(syncs)
 
@@ -43,9 +50,6 @@ class Services private constructor(context: Context) {
     val git: Git by lazy { BundledGit(context).install() }
     val device: String = Build.MODEL
     val licenses: LicenseSource = AssetLicenses { path -> context.assets.open(path).bufferedReader().use { it.readText() } }
-
-    // Kept out of backups: a git dir can be large, and the remote has it all
-    private val gitDirs = context.noBackupFilesDir.resolve("repos")
 
     // For work that outlives the screen that started it
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -65,13 +69,16 @@ class Services private constructor(context: Context) {
     val outgoing = Outgoing(repos, { synchronized(locks.of(it.id)) { PendingChanges(git).of(repo(it)) } }, scope)
 
     // Connecting commits nothing, so who it runs as never shows
-    val connector = Connector({ git }, Identity("SafeGit", "safegit@users.noreply.github.com"), signIn::credentials, repos, syncer, ::gitDir, scope)
+    val connector = Connector({ git }, Identity("SafeGit", "safegit@users.noreply.github.com"), signIn::credentials, repos, syncer, ::gitDir, context.cacheDir, scope)
+    val branches = RemoteBranches(connector::branches)
 
     fun repo(saved: SavedRepo) = Repo(gitDir(saved.id), saved.folder)
 
     private fun gitDir(id: String) = gitDirs.resolve("$id.git")
 
     companion object {
+        private const val HEAD_BRANCH = "ref: refs/heads/"
+
         @Volatile
         private var instance: Services? = null
 

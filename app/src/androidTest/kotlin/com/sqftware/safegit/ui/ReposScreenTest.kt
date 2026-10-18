@@ -3,6 +3,7 @@ package com.sqftware.safegit.ui
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.performClick
@@ -31,9 +32,9 @@ class ReposScreenTest {
     @get:Rule
     val compose = createComposeRule()
 
-    private val vault = SavedRepo("1", "https://github.com/me/notes.git", File("/storage/emulated/0/Documents/notes"))
-    private val journal = SavedRepo("2", "https://github.com/me/journal.git", File("/storage/emulated/0/Documents/journal"))
-    private val photos = SavedRepo("3", "https://github.com/me/photos.git", File("/storage/emulated/0/Documents/photos"))
+    private val vault = SavedRepo("1", "https://github.com/me/notes.git", File("/storage/emulated/0/Documents/notes"), "main")
+    private val journal = SavedRepo("2", "https://github.com/me/journal.git", File("/storage/emulated/0/Documents/journal"), "main")
+    private val photos = SavedRepo("3", "https://github.com/me/photos.git", File("/storage/emulated/0/Documents/photos"), "main")
     private val refused = SyncState.Finished(SyncResult.Failed(Problem.SIGN_IN, "fatal: could not read Username for 'https://github.com': terminal prompts disabled"))
 
     @Test
@@ -121,6 +122,14 @@ class ReposScreenTest {
         compose.setContent { ReposScreen(listOf(RepoRow(vault.copy(auto = AutoSync.WEEKLY), null)), onSync = { _, _ -> }, onAdd = {}) }
 
         compose.onNodeWithText("Auto sync: Every week").assertExists()
+    }
+
+    @Test
+    fun showsTheBranchARepoSyncs() {
+        compose.setContent { ReposScreen(listOf(RepoRow(vault.copy(branch = "drafts"), null)), onSync = { _, _ -> }, onAdd = {}) }
+
+        compose.onNodeWithContentDescription("Branch: drafts").assertExists()
+        compose.onNodeWithText("drafts", useUnmergedTree = true).assertExists()
     }
 
     @Test

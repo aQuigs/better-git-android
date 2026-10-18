@@ -7,7 +7,7 @@ import java.nio.file.Files
 
 /**
  * Connects a folder to a remote repo the way [SafeSync] needs it: the git dir in private storage, set for the rules of
- * the folder's storage, with the remote's default branch as upstream. Nothing in the folder is touched. The first sync
+ * the folder's storage, with a branch of the remote as upstream. Nothing in the folder is touched. The first sync
  * brings the remote's files in, merging with any already there; where the folder has a `.git` of its own, as one Git
  * Sync made, its last commit is where the folder's own changes start. That repo must sync with the same remote branch
  * and be at rest, or the first sync could push what it holds back: markers of a rebase it stopped, files a sparse
@@ -16,9 +16,29 @@ import java.nio.file.Files
  */
 class RepoSetup(private val git: Git, private val identity: Identity) {
     sealed interface Result {
-        data class Connected(val repo: Repo) : Result
+        data class Connected(val repo: Repo, val branch: String) : Result
 
         data class Failed(val problem: Problem, val detail: String = "") : Result
+    }
+
+    /** A remote's branches, to pick one to connect to. */
+    sealed interface Branches {
+        /** By name, with [default] the one the remote's HEAD names, if it names one. */
+        data class Listed(val names: List<String>, val default: String?) : Branches
+
+        data class Failed(val problem: Problem, val detail: String = "") : Branches
+    }
+
+    /** Lists [url]'s branches, running git in [dir], which can be any folder. */
+    fun branches(url: String, dir: File, credentials: Credentials = Credentials.NONE): Branches {
+        if (url.startsWith("-")) return Branches.Failed(Problem.FETCH, "Not a repo URL: $url")
+        val heads = lsRemote(dir, url, credentials, "HEAD", "$HEADS*")
+        if (!heads.ok) return Branches.Failed(heads.remoteProblem(Problem.FETCH), heads.stderr.trim())
+
+        // "<id>\trefs/heads/<branch>", and "ref: <target>\t<name>" before each symbolic one
+        val names = heads.stdout.lines().filterNot { it.startsWith("ref: ") }.map { it.substringAfter("\t") }.filter { it.startsWith(HEADS) }
+            .map { it.removePrefix(HEADS) }
+        return Branches.Listed(names, defaultBranch(heads.stdout))
     }
 
     /** Connects to [branch], or to the remote's default branch when it is null. */
@@ -37,11 +57,9 @@ class RepoSetup(private val git: Git, private val identity: Identity) {
         gitDir.parentFile?.mkdirs()
 
         // Asked before anything is made, so a wrong URL or a missing sign-in leaves nothing to clean up
-        val head = git.run(gitDir.parentFile, listOf("ls-remote", "--symref", url, "HEAD"), identity.environment + credentials.environment())
+        val head = lsRemote(gitDir.parentFile, url, credentials, "HEAD")
         if (!head.ok) return Result.Failed(head.remoteProblem(Problem.FETCH), head.stderr.trim())
-        // "ref: refs/heads/<branch>\tHEAD", or nothing from a repo without commits
-        val upstream = branch ?: head.stdout.lines().firstOrNull { it.startsWith("ref: ") }?.substringAfter("ref: ")?.substringBefore("\t")
-            ?.removePrefix("refs/heads/") ?: DEFAULT_BRANCH
+        val upstream = branch ?: defaultBranch(head.stdout) ?: DEFAULT_BRANCH
 
         return try {
             create(RepoGit(git, Repo(gitDir, folder), identity), url, upstream, submodule)
@@ -51,6 +69,13 @@ class RepoSetup(private val git: Git, private val identity: Identity) {
             Result.Failed(Problem.FOLDER_WRITE, e.message.orEmpty())
         }.also { if (it !is Result.Connected) gitDir.deleteRecursively() }
     }
+
+    private fun lsRemote(dir: File, url: String, credentials: Credentials, vararg patterns: String) =
+        git.run(dir, listOf("ls-remote", "--symref", url, *patterns), identity.environment + credentials.environment())
+
+    // "ref: refs/heads/<branch>\tHEAD", or nothing from a repo without commits; the pattern HEAD matches any ref ending so
+    private fun defaultBranch(lsRemote: String) = lsRemote.lines().firstOrNull { it.startsWith("ref: $HEADS") && it.endsWith("\tHEAD") }
+        ?.removePrefix("ref: $HEADS")?.substringBefore("\t")
 
     private fun create(repoGit: RepoGit, url: String, branch: String, submodule: Boolean): Result {
         val folder = repoGit.repo.workTree
@@ -82,7 +107,7 @@ class RepoSetup(private val git: Git, private val identity: Identity) {
             repoGit.check("read-tree", "HEAD")
             repoGit.probe("update-index", "-q", "--refresh")
         }
-        return Result.Connected(repoGit.repo)
+        return Result.Connected(repoGit.repo, branch)
     }
 
     /** The folder's own repo, read but never written. */
@@ -145,6 +170,7 @@ class RepoSetup(private val git: Git, private val identity: Identity) {
 
     private companion object {
         const val DEFAULT_BRANCH = "main"
+        const val HEADS = "refs/heads/"
         const val PROBE = ".safegit-probe"
 
         /** Another app's files in shared storage belong to another user, and git refuses to read such a repo. */

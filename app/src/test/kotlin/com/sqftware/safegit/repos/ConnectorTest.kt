@@ -57,7 +57,7 @@ class ConnectorTest {
     @Before
     fun setUp() {
         remote = temp.newFolder("remote.git")
-        assertTrue(git.run(remote, listOf("init", "-q", "--bare")).ok)
+        assertTrue(git.run(remote, listOf("init", "-q", "--bare", "-b", "main")).ok)
         folder = temp.newFolder("vault")
     }
 
@@ -66,10 +66,23 @@ class ConnectorTest {
         val state = connect(remote.path, folder)
 
         val repo = (state as Connector.State.Connected).repo
-        assertEquals(SavedRepo(repo.id, remote.path, folder), repo)
+        assertEquals(SavedRepo(repo.id, remote.path, folder, "main"), repo)
         assertEquals(listOf(repo), repos.all.first())
         assertEquals(listOf(repo), synced)
         assertTrue(gitDirs.resolve("${repo.id}.git").isDirectory)
+    }
+
+    @Test
+    fun savesThePickedBranch() = runBlocking {
+        val state = connect(remote.path, folder, branch = "drafts")
+
+        assertEquals("drafts", (state as Connector.State.Connected).repo.branch)
+        assertEquals("drafts", repos.all.first().single().branch)
+    }
+
+    @Test
+    fun listsNoBranchesForAUrlItWouldRefuse() = runBlocking {
+        assertEquals(null, connector(this).branches("https://me:ghp_secret@github.com/me/notes.git"))
     }
 
     @Test
@@ -99,11 +112,14 @@ class ConnectorTest {
         assertEquals(1, repos.all.first().size)
     }
 
-    private suspend fun CoroutineScope.connect(url: String, folder: File): Connector.State {
-        val connector = Connector({ git }, Identity("Phone", "phone@example.com"), { Credentials.NONE }, repos, syncer, { gitDirs.resolve("$it.git") }, this)
-        connector.connect(url, folder)
+    private suspend fun CoroutineScope.connect(url: String, folder: File, branch: String? = null): Connector.State {
+        val connector = connector(this)
+        connector.connect(url, folder, branch)
         return connector.state.first { it != Connector.State.Connecting }
     }
+
+    private fun connector(scope: CoroutineScope) =
+        Connector({ git }, Identity("Phone", "phone@example.com"), { Credentials.NONE }, repos, syncer, { gitDirs.resolve("$it.git") }, temp.root, scope)
 
     private class MemoryRepoStore : RepoStore {
         override val all = MutableStateFlow(emptyList<SavedRepo>())

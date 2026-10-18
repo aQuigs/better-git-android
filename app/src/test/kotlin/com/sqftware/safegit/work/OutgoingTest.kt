@@ -12,8 +12,8 @@ import org.junit.Test
 import java.io.File
 
 class OutgoingTest {
-    private val notes = SavedRepo("1", "https://github.com/me/notes.git", File("/storage/emulated/0/Documents/notes"))
-    private val work = SavedRepo("2", "https://github.com/me/work.git", File("/storage/emulated/0/Documents/work"))
+    private val notes = SavedRepo("1", "https://github.com/me/notes.git", File("/storage/emulated/0/Documents/notes"), "main")
+    private val work = SavedRepo("2", "https://github.com/me/work.git", File("/storage/emulated/0/Documents/work"), "main")
     private val store = object : RepoStore {
         override val all: Flow<List<SavedRepo>> = flowOf(listOf(notes, work))
 

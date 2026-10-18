@@ -8,6 +8,7 @@
 
     <string name="repos_empty">Connect a folder to a git repo to start syncing it.</string>
     <string name="repos_add">Add a repo</string>
+    <string name="repo_branch">Branch: %1$s</string>
     <string name="sync">Sync</string>
     <string name="sync_with_choices">Sync with these choices</string>
     <string name="sync_all">Sync all</string>
@@ -114,6 +115,10 @@
     <string name="add_url_pick">Pick one of your GitHub repos, or paste any URL.</string>
     <string name="add_sign_in_refused">GitHub no longer accepts this sign-in. Sign out and sign in again.</string>
     <string name="add_repos_failed">Couldn\'t list your GitHub repos. Paste the URL instead.</string>
+    <string name="add_branch">Branch</string>
+    <string name="add_branch_default">%1$s (default)</string>
+    <string name="add_branch_pick">Pick a branch</string>
+    <string name="add_branches_failed">Couldn\'t list this repo\'s branches. Connecting takes its default branch.</string>
     <string name="add_folder">Choose folder</string>
     <string name="add_folder_none">No folder chosen</string>
     <string name="add_folder_explain">An empty folder gets the repo\'s files. A folder that already has notes keeps them, and they merge with the repo\'s on the first sync.</string>
