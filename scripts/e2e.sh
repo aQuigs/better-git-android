@@ -174,6 +174,12 @@ laptop pull -q
 cmp -s $WORK/phone.png $WORK/laptop/photo.png || fail "the phone's photo did not reach the laptop"
 [ ! -e $WORK/laptop/daily/2026-10-13.md ] || fail "the phone's deletion did not reach the laptop"
 
+echo "== The server is out of reach"
+adb reverse --remove tcp:$PORT
+tap "Sync"
+await "Couldn't get the remote's changes."
+adb reverse tcp:$PORT tcp:$PORT >/dev/null
+
 # Turning automatic syncs on runs the first right away, which is what starts each run here
 auto_on() {
   tap "Auto sync: Off"
@@ -240,5 +246,28 @@ sleep 1
 tap "Sync"
 within "Sync wrote no markers" markers welcome.md
 notice "changed the same lines" && fail "the notification outlived the sync that showed the conflict"
+
+echo "== Diagnostics"
+scroll_to() { for _ in 1 2 3 4 5; do shown "$1" && return; adb shell input swipe 500 1500 500 500 300; sleep 1; done; fail "no '$1' after scrolling"; }
+scroll_to "About, licenses and diagnostics"
+tap "About, licenses and diagnostics"
+scroll_to "Copy diagnostics"
+tap "Copy diagnostics"
+await "Copied. Paste it into your bug report." 10
+shot diagnostics
+# The clipboard is only readable by the app in front, so the report is pasted where the screen shows it
+adb shell input keyevent 4
+tap "Add a repo"
+tap "Repo URL"
+adb shell input keyevent 279
+sleep 1
+report=$(texts)
+adb shell input keyevent 4
+for want in "SafeGit diagnostics" "git version" "conflicted files: 1, marked" "choices to make: 2" "failed: FETCH" "<address>"; do
+  [[ "$report" == *"$want"* ]] || fail "the report lacks '$want': $report"
+done
+for secret in 127.0.0.1 $PORT/remote Notes welcome photo /sdcard /storage; do
+  [[ "$report" == *"$secret"* ]] && fail "the report shows '$secret': $report"
+done
 
 echo "E2E passed; shots in $OUT"

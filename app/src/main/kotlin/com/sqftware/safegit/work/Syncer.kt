@@ -230,12 +230,17 @@ class SyncWorker(context: Context, params: WorkerParameters) : CoroutineWorker(c
         services.running.start(saved.id, cancellation)
         try {
             var choices = emptyMap<Choice, Keep>()
+            val started = System.currentTimeMillis()
+            val steps = mutableListOf<Pair<Step, Long>>()
             val result = try {
-                if (automatic && AutoRuns.putOff(RecentEdits(services.git).latest(repo), System.currentTimeMillis())) return null
+                if (automatic && AutoRuns.putOff(RecentEdits(services.git).latest(repo), started)) return null
                 // The user's choices wait for the sync they start; an automatic one leaves conflicts to it too
                 if (!automatic) choices = services.records.takeChoices(saved.id)
                 SafeSync(services.git, services.signIn.identity(services.device), services.device, message = CommitTemplate(saved.message))
-                    .sync(repo, services.signIn.credentials(), choices, attended = !automatic, cancellation) { services.running.step(saved.id, it) }
+                    .sync(repo, services.signIn.credentials(), choices, attended = !automatic, cancellation) { step ->
+                        steps += step to System.currentTimeMillis() - started
+                        services.running.step(saved.id, step)
+                    }
             } catch (e: Exception) {
                 // Shown like any other failure rather than leaving the last result up as if nothing had happened
                 SyncResult.Failed(Problem.GIT, e.toString())
@@ -248,8 +253,10 @@ class SyncWorker(context: Context, params: WorkerParameters) : CoroutineWorker(c
             } else {
                 services.records.saveResult(saved.id, result)
             }
+            val millis = System.currentTimeMillis() - started
             services.outgoing.synced(saved)
             inputData.getString(ALL)?.let { services.records.saveAllResult(it, saved.id, result) }
+            services.diagnostics.record(saved, started, automatic, steps, millis, result)
             return result
         } finally {
             services.running.end(saved.id)

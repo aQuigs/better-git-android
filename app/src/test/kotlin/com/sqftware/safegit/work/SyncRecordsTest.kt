@@ -3,6 +3,7 @@ package com.sqftware.safegit.work
 import com.sqftware.safegit.sync.Choice
 import com.sqftware.safegit.sync.Keep
 import com.sqftware.safegit.sync.Problem
+import com.sqftware.safegit.sync.Step
 import com.sqftware.safegit.sync.SyncResult
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -61,6 +62,16 @@ class SyncRecordsTest {
         records.saveAllResult("earlier", "a", SyncResult.UpToDate)
 
         assertEquals(AllRun(listOf("a")), records.all())
+    }
+
+    @Test
+    fun keepsTheLastTwentySyncsNewestFirst() {
+        assertEquals(emptyList<PastSync>(), records.history())
+
+        val syncs = (1..21).map { PastSync("repo", it.toLong(), it % 2 == 0, listOf(Step.COMMIT to 3L, Step.FETCH to 40L), 90, "failed: FETCH", listOf("no network")) }
+        syncs.forEach(records::log)
+
+        assertEquals(syncs.reversed().take(20), records.history())
     }
 
     @Test

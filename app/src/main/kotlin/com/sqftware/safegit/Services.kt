@@ -8,6 +8,7 @@ import com.sqftware.safegit.about.LicenseSource
 import com.sqftware.safegit.auth.GitHubDeviceFlow
 import com.sqftware.safegit.auth.KeystoreTokenStore
 import com.sqftware.safegit.auth.SignIn
+import com.sqftware.safegit.diagnostics.Diagnostics
 import com.sqftware.safegit.git.BundledGit
 import com.sqftware.safegit.git.Git
 import com.sqftware.safegit.repos.AccountRepos
@@ -74,6 +75,7 @@ class Services private constructor(context: Context) {
     // Connecting commits nothing, so who it runs as never shows
     val connector = Connector({ git }, Identity("SafeGit", "safegit@users.noreply.github.com"), signIn::credentials, repos, syncer, ::gitDir, context.cacheDir, scope)
     val branches = RemoteBranches(connector::branches)
+    val diagnostics = Diagnostics(context, repos, records, { git }, signIn, licenses, ::repo)
 
     fun repo(saved: SavedRepo) = Repo(gitDir(saved.id), saved.folder)
 

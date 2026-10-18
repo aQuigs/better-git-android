@@ -33,10 +33,17 @@ import com.sqftware.safegit.about.Licenses
 
 /**
  * The app's [version], what it ships with each license, and the source offer git's license calls for; [licenses] is null
- * while they load. [onOpen] opens a web or mailto address.
+ * while they load. [onOpen] opens a web or mailto address. [onCopyDiagnostics] copies a report for a bug, and [copied]
+ * says it has.
  */
 @Composable
-fun AboutScreen(version: String, licenses: Licenses?, onOpen: (uri: String) -> Unit) {
+fun AboutScreen(
+    version: String,
+    licenses: Licenses?,
+    onOpen: (uri: String) -> Unit,
+    onCopyDiagnostics: () -> Unit,
+    copied: Boolean,
+) {
     // The name of the package whose license is open, or APP_LIBRARIES
     var open by rememberSaveable { mutableStateOf<String?>(null) }
     // Remembered while a license is open, so closing it returns to the same place in the list
@@ -61,6 +68,14 @@ fun AboutScreen(version: String, licenses: Licenses?, onOpen: (uri: String) -> U
                     Text(stringResource(R.string.about_version, version), style = MaterialTheme.typography.bodyMedium)
                     Text(stringResource(R.string.about_app), Modifier.padding(top = 16.dp))
                     TextButton(onClick = { onOpen(SOURCE) }) { Text(stringResource(R.string.about_source)) }
+                }
+            }
+
+            item {
+                Column {
+                    Heading(stringResource(R.string.diagnostics_title), stringResource(R.string.diagnostics_body))
+                    OutlinedButton(onClick = onCopyDiagnostics, Modifier.padding(top = 8.dp)) { Text(stringResource(R.string.diagnostics_copy)) }
+                    if (copied) Text(stringResource(R.string.diagnostics_copied), style = MaterialTheme.typography.bodyMedium)
                 }
             }
 

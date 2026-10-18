@@ -7,6 +7,7 @@ import com.sqftware.safegit.storage.writeAtomically
 import com.sqftware.safegit.sync.Choice
 import com.sqftware.safegit.sync.Keep
 import com.sqftware.safegit.sync.Problem
+import com.sqftware.safegit.sync.Step
 import com.sqftware.safegit.sync.SyncResult
 import org.json.JSONArray
 import org.json.JSONException
@@ -14,7 +15,22 @@ import org.json.JSONObject
 import java.io.File
 
 /**
- * Each repo's last sync result and the choices for its next one, and the last sync of every repo, kept in files:
+ * A sync that ran, as a diagnostics report tells it: when, how long each of its [steps] took to start in ms from
+ * [started], and how it ended, in words that name no file, folder, remote or account.
+ */
+data class PastSync(
+    val repo: String,
+    val started: Long,
+    val automatic: Boolean,
+    val steps: List<Pair<Step, Long>>,
+    val millis: Long,
+    val outcome: String,
+    val detail: List<String>,
+)
+
+/**
+ * Each repo's last sync result and the choices for its next one, the last sync of every repo, and the last syncs of
+ * them all, for a diagnostics report, kept in files:
  * WorkManager's own data is capped at 10 KB, which a long list of conflicted paths can pass. Every call blocks on file
  * I/O.
  */
@@ -66,6 +82,15 @@ class SyncRecords(private val dir: File) {
         json.getString("run") to AllRun(json.getJSONArray("ids").strings(), results.keys().asSequence().associateWith { decode(results.getJSONObject(it)) })
     }
 
+    /** The last [HISTORY] syncs, newest first. */
+    fun history(): List<PastSync> = read(dir.resolve(PAST)) { json -> json.getJSONArray("syncs").objects().map(::decodePast) }.orEmpty()
+
+    @Synchronized
+    fun log(sync: PastSync) {
+        val syncs = listOf(sync) + history().take(HISTORY - 1)
+        dir.resolve(PAST).writeAtomically(JSONObject().put("syncs", JSONArray(syncs.map(::encode))).toString())
+    }
+
     /** What [file] holds, or null when there is none or this version cannot read it. */
     private fun <T> read(file: File, parse: (JSONObject) -> T): T? {
         if (!file.exists()) return null
@@ -106,6 +131,20 @@ class SyncRecords(private val dir: File) {
         else -> throw IllegalArgumentException("Unknown sync result $type")
     }
 
+    private fun encode(sync: PastSync) = JSONObject().put("repo", sync.repo).put("started", sync.started).put("automatic", sync.automatic)
+        .put("steps", JSONArray(sync.steps.map { (step, at) -> JSONObject().put("step", step.name).put("at", at) }))
+        .put("millis", sync.millis).put("outcome", sync.outcome).put("detail", JSONArray(sync.detail))
+
+    private fun decodePast(json: JSONObject) = PastSync(
+        json.getString("repo"),
+        json.getLong("started"),
+        json.getBoolean("automatic"),
+        json.getJSONArray("steps").objects().map { Step.valueOf(it.getString("step")) to it.getLong("at") },
+        json.getLong("millis"),
+        json.getString("outcome"),
+        json.getJSONArray("detail").strings(),
+    )
+
     private fun encode(choice: Choice) = JSONObject().put("path", choice.path)
         .put("local", choice.local ?: JSONObject.NULL).put("remote", choice.remote ?: JSONObject.NULL)
 
@@ -115,5 +154,7 @@ class SyncRecords(private val dir: File) {
         const val RESULT = "result"
         const val CHOICES = "choices"
         const val ALL = "all.json"
+        const val PAST = "history.json"
+        const val HISTORY = 20
     }
 }
