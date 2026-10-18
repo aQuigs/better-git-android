@@ -50,6 +50,7 @@ import com.sqftware.safegit.ui.AddRepoScreen
 import com.sqftware.safegit.ui.HistoryScreen
 import com.sqftware.safegit.ui.RepoRow
 import com.sqftware.safegit.ui.ReposScreen
+import com.sqftware.safegit.ui.ResolveScreen
 import java.io.File
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -99,6 +100,8 @@ private fun App(services: Services) {
     var adding by rememberSaveable { mutableStateOf(false) }
     var about by rememberSaveable { mutableStateOf(false) }
     var history by rememberSaveable { mutableStateOf<String?>(null) }
+    // The repo's id and the path of the marked file open
+    var resolving by rememberSaveable { mutableStateOf<Pair<String, String>?>(null) }
     val connecting by services.connector.state.collectAsState()
 
     // Also when the user left the add screen while it connected
@@ -110,11 +113,19 @@ private fun App(services: Services) {
     }
 
     val historyOf = history
+    val resolve = resolving
     when {
         adding -> AddRepo(services, connecting, onDone = { adding = false })
         about -> About(services, onDone = { about = false })
         historyOf != null -> History(services, historyOf, onDone = { history = null })
-        else -> Repos(services, onAdd = { adding = true }, onAbout = { about = true }, onHistory = { history = it.id })
+        resolve != null -> Resolve(services, resolve.first, resolve.second, onDone = { resolving = null })
+        else -> Repos(
+            services,
+            onAdd = { adding = true },
+            onAbout = { about = true },
+            onHistory = { history = it.id },
+            onResolve = { repo, path -> resolving = repo.id to path },
+        )
     }
 }
 
@@ -153,7 +164,19 @@ private fun History(services: Services, id: String, onDone: () -> Unit) {
 }
 
 @Composable
-private fun Repos(services: Services, onAdd: () -> Unit, onAbout: () -> Unit, onHistory: (SavedRepo) -> Unit) {
+private fun Resolve(services: Services, id: String, path: String, onDone: () -> Unit) {
+    val repos = services.repos.all.collectAsState(null).value ?: return
+    val repo = repos.firstOrNull { it.id == id }
+    // Disconnected meanwhile
+    if (repo == null) {
+        LaunchedEffect(Unit) { onDone() }
+        return
+    }
+    ResolveScreen(path, open = { services.openMarked(repo, path) }, save = { file, text -> services.saveMarked(repo, file, text) }, onDone)
+}
+
+@Composable
+private fun Repos(services: Services, onAdd: () -> Unit, onAbout: () -> Unit, onHistory: (SavedRepo) -> Unit, onResolve: (SavedRepo, String) -> Unit) {
     val repos by services.repos.all.collectAsState(null)
     val states by services.syncer.states.collectAsState(emptyMap())
     val all by services.syncer.all.collectAsState(null)
@@ -183,6 +206,7 @@ private fun Repos(services: Services, onAdd: () -> Unit, onAbout: () -> Unit, on
         onCancelAll = services.syncer::cancelAll,
         onCloseAll = services.syncer::closeAll,
         preview = services::preview,
+        onResolve = onResolve,
         header = {
             AccountCard(
                 account,

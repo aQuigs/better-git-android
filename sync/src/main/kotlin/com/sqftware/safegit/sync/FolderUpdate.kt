@@ -39,8 +39,7 @@ internal class FolderUpdate(private val git: RepoGit) {
     private val workTree = git.repo.workTree
     private val staging = git.repo.gitDir.resolve("safegit-staging")
 
-    // In the folder itself, since a rename is only atomic within one file system, and short, since names have a limit
-    private val temp = workTree.resolve(".safegit.tmp")
+    private val temp = temp(workTree)
 
     /**
      * Deals with a move a killed sync left recorded: finished once the branch has moved, redone or put back while it
@@ -305,9 +304,15 @@ internal class FolderUpdate(private val git: RepoGit) {
         return total
     }
 
-    private companion object {
-        const val FROM = "refs/safegit/move-from"
-        const val TO = "refs/safegit/move-to"
-        const val CHUNK = 64 * 1024
+    companion object {
+        /**
+         * Where a file is written before its rename into [workTree]: in the folder itself, since a rename is only atomic
+         * within one file system, and short, since names have a limit. A sync removes one a kill left before it commits.
+         */
+        fun temp(workTree: File): File = workTree.resolve(".safegit.tmp")
+
+        private const val FROM = "refs/safegit/move-from"
+        private const val TO = "refs/safegit/move-to"
+        private const val CHUNK = 64 * 1024
     }
 }

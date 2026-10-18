@@ -149,7 +149,7 @@ internal val previewing = Dispatchers.IO.limitedParallelism(2)
 private fun size(bytes: Long) = Formatter.formatShortFileSize(LocalContext.current, bytes)
 
 @Composable
-private fun sideColor(side: Keep) = if (side == Keep.LOCAL) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.tertiaryContainer
+internal fun sideColor(side: Keep) = if (side == Keep.LOCAL) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.tertiaryContainer
 
 private const val SHORT_ID = 7
 private const val THUMBNAIL = 96

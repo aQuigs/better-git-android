@@ -1,6 +1,6 @@
 #!/bin/bash
 # Drives the debug build on the emulator through a whole sync story against a repo this Mac serves, playing the laptop
-# itself: connect an empty folder, sync, conflict on one line, resolve it by editing, then choose a version of a binary.
+# itself: connect an empty folder, sync, conflict on one line, resolve it on the resolve screen, then choose a version of a binary.
 # Then automatic syncs: one pulls, one waits while a file is being saved, and one leaves a conflict for the user.
 # Wipes the app's data and /sdcard/Documents/Notes. Shots land in screenshots/e2e/.
 # Usage: ./gradlew assembleDebug && scripts/emulator-lock.sh scripts/e2e.sh   (VARIANT=release after assembleRelease)
@@ -144,13 +144,23 @@ shot conflict
 adb shell "grep -q '^>>>>>>> remote' $FOLDER/welcome.md" || fail "no markers in welcome.md"
 [ "$(git -C $WORK/remote.git log -1 --format=%s)" == "Laptop's plan" ] || fail "pushed while markers were left"
 
-echo "== The phone resolves it"
-phone_writes welcome.md '# Welcome\n\nThese notes sync with SafeGit.\n\nToday: read, then write.\n'
+echo "== The phone resolves it in SafeGit, keeping both"
+tap "Resolve"
+await "Conflict 1 of 1" 10
+shot resolve
+tap "Keep both"
+shot resolve-picked
+# An edit starts from both sides, so saving it untouched keeps both
+tap "Edit"
+shot resolve-edit
+tap "Save"
+await "Sync" 10
+adb shell "grep -q '^>>>>>>> remote' $FOLDER/welcome.md" && fail "markers left after resolving"
 tap "Sync"
 sleep 2
 await "Synced"
 laptop pull -q
-grep -q "read, then write" $WORK/laptop/welcome.md || fail "the resolution did not reach the laptop"
+grep -q "phone wants to read" $WORK/laptop/welcome.md && grep -q "laptop wants to write" $WORK/laptop/welcome.md || fail "the resolution did not reach the laptop"
 
 echo "== Both change a photo, and the phone deletes a note the laptop edits"
 png 40,110,220 > $WORK/phone.png
