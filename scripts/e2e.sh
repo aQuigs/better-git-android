@@ -19,18 +19,21 @@ rm -f $OUT/*.png
 
 dump() { adb shell uiautomator dump /sdcard/ui.xml >/dev/null 2>&1; adb shell cat /sdcard/ui.xml; }
 texts() { dump | python3 -c "import sys,re,html; print([html.unescape(t) for t in re.findall(r' text=\"([^\"]+)\"', sys.stdin.read())])"; }
-# "x y" of the first node whose text or description is $1, ignoring case
+# "x y" of the first node, or the $2th, whose text or description is $1, ignoring case
 center() {
   dump | python3 -c "
 import sys,re,html
 want=sys.argv[1].lower()
+nth=int(sys.argv[2])
 for n in re.findall(r'<node [^>]*>', sys.stdin.read()):
     label=lambda a: html.unescape((re.search(a+r'=\"([^\"]*)\"',n) or [0,''])[1]).lower()
     if want in (label(' text'), label('content-desc')):
+        nth-=1
+        if nth: continue
         x1,y1,x2,y2=map(int,re.search(r'bounds=\"\[(\d+),(\d+)\]\[(\d+),(\d+)\]\"',n).groups()); print((x1+x2)//2,(y1+y2)//2); break
-" "$1"
+" "$1" "${2:-1}"
 }
-tap() { local at; at=$(center "$1"); [ -n "$at" ] || fail "no '$1' on screen"; adb shell input tap $at; sleep 1; }
+tap() { local at; at=$(center "$1" "${2:-1}"); [ -n "$at" ] || fail "no '$1' on screen"; adb shell input tap $at; sleep 1; }
 # Runs the command after the message until it succeeds, for at most WITHIN seconds
 within() { local why=$1; shift; local end=$((SECONDS + ${WITHIN:-60})); until "$@"; do [ $SECONDS -lt $end ] || fail "$why"; sleep 1; done; }
 shown() { [ -n "$(center "$1")" ]; }
@@ -41,6 +44,17 @@ shot() { adb shell dumpsys input_method | grep -q 'mInputShown=true' && adb shel
 fail() { echo "FAILED: $*"; adb exec-out screencap -p > $OUT/failed.png; texts; exit 1; }
 laptop() { git -C $WORK/laptop -c user.name=Laptop -c user.email=laptop@example.com "$@"; }
 phone_writes() { adb shell "printf '$2' > $FOLDER/$1"; }
+# A small square PNG of colour "r,g,b", so a choice between two shows real thumbnails
+png() {
+  python3 -c "
+import struct,sys,zlib
+r,g,b=map(int,sys.argv[1].split(','))
+n=48
+chunk=lambda t,d: struct.pack('>I',len(d))+t+d+struct.pack('>I',zlib.crc32(t+d))
+rows=b''.join(b'\0'+bytes((r,g,b))*n for _ in range(n))
+sys.stdout.buffer.write(b'\x89PNG\r\n\x1a\n'+chunk(b'IHDR',struct.pack('>IIBBBBB',n,n,8,2,0,0,0))+chunk(b'IDAT',zlib.compress(rows))+chunk(b'IEND',b''))
+" "$1"
+}
 
 echo "== Remote and laptop"
 git init -q --bare -b main $WORK/remote.git
@@ -138,20 +152,27 @@ await "Synced"
 laptop pull -q
 grep -q "read, then write" $WORK/laptop/welcome.md || fail "the resolution did not reach the laptop"
 
-echo "== Both change a binary file"
-phone_writes photo.png '\\211PNG\\000phone'
-printf '\211PNG\000laptop' > $WORK/laptop/photo.png
-laptop commit -qam "Laptop's photo" && laptop push -q
+echo "== Both change a photo, and the phone deletes a note the laptop edits"
+png 40,110,220 > $WORK/phone.png
+adb push $WORK/phone.png $FOLDER/photo.png >/dev/null
+adb shell rm $FOLDER/daily/2026-10-13.md
+png 230,120,30 > $WORK/laptop/photo.png
+printf -- '- wrote the e2e\n- and ran it\n- on the laptop too\n' > $WORK/laptop/daily/2026-10-13.md
+laptop commit -qam "Laptop's photo and note" && laptop push -q
 tap "Sync"
 await "photo.png"
+await "This phone: image" 10
+await "Deleted" 10
 shot choose
-tap "Keep this phone's"
+tap "Keep this phone's" 1
+tap "Keep this phone's" 2
 shot chosen
 tap "Sync with these choices"
 sleep 2
 await "Synced"
 laptop pull -q
-grep -q phone $WORK/laptop/photo.png || fail "the phone's photo did not reach the laptop"
+cmp -s $WORK/phone.png $WORK/laptop/photo.png || fail "the phone's photo did not reach the laptop"
+[ ! -e $WORK/laptop/daily/2026-10-13.md ] || fail "the phone's deletion did not reach the laptop"
 
 # Turning automatic syncs on runs the first right away, which is what starts each run here
 auto_on() {

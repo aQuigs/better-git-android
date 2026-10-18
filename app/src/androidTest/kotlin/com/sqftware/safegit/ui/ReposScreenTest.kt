@@ -1,6 +1,9 @@
 package com.sqftware.safegit.ui
 
+import android.graphics.Bitmap
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsEnabled
+import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -14,11 +17,14 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.sqftware.safegit.repos.AutoSync
 import com.sqftware.safegit.repos.SavedRepo
 import com.sqftware.safegit.sync.Choice
+import com.sqftware.safegit.sync.ChoicePreview
+import com.sqftware.safegit.sync.DiffLine
 import com.sqftware.safegit.sync.Keep
 import com.sqftware.safegit.sync.Pending
 import com.sqftware.safegit.sync.Problem
 import com.sqftware.safegit.sync.Step
 import com.sqftware.safegit.sync.SyncResult
+import com.sqftware.safegit.sync.Version
 import com.sqftware.safegit.work.AllRun
 import com.sqftware.safegit.work.SyncState
 import androidx.compose.runtime.getValue
@@ -28,6 +34,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
+import java.io.ByteArrayOutputStream
 import java.io.File
 
 @RunWith(AndroidJUnit4::class)
@@ -235,6 +242,56 @@ class ReposScreenTest {
         compose.onNodeWithText("Sync with these choices").performClick()
 
         assertEquals(listOf(mapOf(photo to Keep.LOCAL, deleted to Keep.REMOTE)), synced)
+    }
+
+    @Test
+    fun showsWhatEachSideOfAChoiceHolds() {
+        val photo = Choice("photo.png", local = "a1", remote = "b2")
+        val deleted = Choice("old.md", local = "c3", remote = null)
+        val notes = Choice("notes.md", local = "d4", remote = "e5")
+        val folder = Choice("drafts", local = "f6", remote = "0123456789")
+        val previews = mapOf(
+            photo to ChoicePreview(Version.Image(png()), Version.Binary(2048)),
+            deleted to ChoicePreview(Version.Text(listOf("phone's note"), 3), Version.Deleted),
+            notes to ChoicePreview(
+                Version.Text(listOf("one", "phone"), 2),
+                Version.Text(listOf("one", "remote"), 2),
+                listOf(DiffLine(null, "one"), DiffLine(Keep.REMOTE, "remote line"), DiffLine(Keep.LOCAL, "phone line")),
+            ),
+            folder to ChoicePreview(Version.Folder(3), Version.Elsewhere("0123456789")),
+        )
+        val asked = SyncState.Finished(SyncResult.Choose(previews.keys.toList()))
+        compose.setContent { ReposScreen(listOf(RepoRow(vault, asked)), onSync = { _, _ -> }, onAdd = {}, preview = { _, choice -> previews[choice] }) }
+
+        // Previews are read, and images decoded, off the main thread, which the test's idling does not wait for
+        compose.waitUntil(5_000) {
+            compose.onAllNodesWithContentDescription("This phone: image").fetchSemanticsNodes().isNotEmpty() &&
+                compose.onAllNodesWithText("Changed on this phone and on the remote").fetchSemanticsNodes().isEmpty() &&
+                compose.onAllNodesWithText("This phone has it, the remote deleted it").fetchSemanticsNodes().isEmpty()
+        }
+        compose.onNodeWithText("A file of 2.0 kB").assertExists()
+        compose.onNodeWithText("phone's note").assertExists()
+        compose.onNodeWithText("and 2 more lines").assertExists()
+        compose.onNodeWithText("Deleted").assertExists()
+        compose.onNodeWithText("remote line").assertExists()
+        compose.onNodeWithText("phone line").assertExists()
+        compose.onAllNodesWithText("2 lines").assertCountEquals(2)
+        compose.onNodeWithText("A folder of 3 files").assertExists()
+        compose.onNodeWithText("Version 0123456, kept in a submodule").assertExists()
+    }
+
+    @Test
+    fun saysWhatEachSideHoldsWithoutAPreview() {
+        val deleted = Choice("old.md", local = "c3", remote = null)
+        val asked = SyncState.Finished(SyncResult.Choose(listOf(deleted)))
+        compose.setContent { ReposScreen(listOf(RepoRow(vault, asked)), onSync = { _, _ -> }, onAdd = {}, preview = { _, _ -> null }) }
+
+        compose.onNodeWithText("This phone has it, the remote deleted it").assertExists()
+    }
+
+    private fun png(): ByteArray {
+        val bitmap = Bitmap.createBitmap(8, 8, Bitmap.Config.ARGB_8888).apply { eraseColor(android.graphics.Color.RED) }
+        return ByteArrayOutputStream().also { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }.toByteArray()
     }
 
     @Test
