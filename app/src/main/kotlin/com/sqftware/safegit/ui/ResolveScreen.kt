@@ -37,6 +37,7 @@ import androidx.compose.runtime.snapshots.SnapshotStateMap
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
@@ -198,9 +199,17 @@ private fun BlockCard(index: Int, count: Int, block: MarkedFile.Part.Block, cont
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text(stringResource(R.string.resolve_block, index + 1, count), style = MaterialTheme.typography.labelLarge)
             Context(context.first)
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Side(stringResource(R.string.preview_phone), sideColor(Keep.LOCAL), block.local, Modifier.weight(1f))
-                Side(stringResource(R.string.preview_remote), sideColor(Keep.REMOTE), block.remote, Modifier.weight(1f))
+            val phone = stringResource(R.string.preview_phone)
+            val remote = stringResource(R.string.preview_remote)
+            // A long side reads badly in half the width, so long blocks stack their sides
+            if (lineCount(block.local) <= SHOWN_LINES && lineCount(block.remote) <= SHOWN_LINES) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Side(phone, sideColor(Keep.LOCAL), block.local, Modifier.weight(1f))
+                    Side(remote, sideColor(Keep.REMOTE), block.remote, Modifier.weight(1f))
+                }
+            } else {
+                Side(phone, sideColor(Keep.LOCAL), block.local, Modifier.fillMaxWidth())
+                Side(remote, sideColor(Keep.REMOTE), block.remote, Modifier.fillMaxWidth())
             }
             Context(context.second)
 
@@ -237,20 +246,34 @@ private fun Context(text: String) {
     Text(text, fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
 }
 
-/** One side's lines under its name, tinted as the choice preview tints that side. */
+private fun lineCount(text: String) = text.count { it == '\n' }
+
+/** One side's lines under its name, tinted as the choice preview tints that side, its first ones until the user asks for all. */
 @Composable
 private fun Side(name: String, color: Color, text: String, modifier: Modifier) {
+    var all by rememberSaveable { mutableStateOf(false) }
+    val lines = lineCount(text)
     Column(modifier, verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Text(name, style = MaterialTheme.typography.labelMedium)
         Surface(Modifier.fillMaxWidth(), color = color, shape = MaterialTheme.shapes.extraSmall) {
             if (text.isEmpty()) {
                 Text(stringResource(R.string.resolve_no_lines), Modifier.padding(4.dp), style = MaterialTheme.typography.bodySmall, fontStyle = FontStyle.Italic)
             } else {
-                Text(text.removeSuffix("\n"), Modifier.padding(4.dp), fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall)
+                val shown = if (all || lines <= COLLAPSED_OVER) text else text.lineSequence().take(SHOWN_LINES).joinToString("\n")
+                Text(shown.removeSuffix("\n"), Modifier.padding(4.dp), fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall)
+            }
+        }
+        if (lines > COLLAPSED_OVER) {
+            TextButton(onClick = { all = !all }) {
+                Text(if (all) stringResource(R.string.resolve_show_fewer) else pluralStringResource(R.plurals.resolve_show_all, lines, lines))
             }
         }
     }
 }
 
 private const val CONTEXT = 2
+private const val SHOWN_LINES = 12
+
+// Cutting a few lines short would save less room than its button takes
+private const val COLLAPSED_OVER = 16
 private const val CONTEXT_CHARS = 1000

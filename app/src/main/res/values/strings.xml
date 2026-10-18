@@ -94,6 +94,11 @@
     <string name="resolve_unreadable">This file cannot be resolved here, as it is gone, too large or not text. Edit it in another app, then sync.</string>
     <string name="resolve_changed">The file changed since it was opened, so it was left as it is. Open it again to see the change.</string>
     <string name="resolve_stray">Some marker lines here are not part of a whole conflict, or their sides cannot be told apart. Edit the file in another app to remove them, then sync.</string>
+    <plurals name="resolve_show_all">
+        <item quantity="one">Show all %1$d line</item>
+        <item quantity="other">Show all %1$d lines</item>
+    </plurals>
+    <string name="resolve_show_fewer">Show fewer</string>
     <string name="resolve_reopen">Open again</string>
     <string name="resolve_failed">Could not save the file: %1$s</string>
     <string name="preview_phone">This phone</string>

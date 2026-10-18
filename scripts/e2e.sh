@@ -162,6 +162,37 @@ await "Synced"
 laptop pull -q
 grep -q "phone wants to read" $WORK/laptop/welcome.md && grep -q "laptop wants to write" $WORK/laptop/welcome.md || fail "the resolution did not reach the laptop"
 
+echo "== A long conflict stacks its sides, each cut short"
+# Lines 1-26 of a plan; between them the sides rewrite every line of 3-25, so one block holds them all
+plan() { for n in $(seq 1 26); do case " $1 " in *" $n "*) echo "Step $n, as the $2 sees it" ;; *) echo "Step $n of the plan" ;; esac; done; }
+plan "" base > $WORK/laptop/plan.md
+laptop add plan.md && laptop commit -qm "The plan" && laptop push -q
+tap "Sync"
+sleep 2
+await "Synced"
+phone_writes plan.md "$(plan "$(seq -s " " 3 2 25)" phone | sed 's/$/\\n/' | tr -d '\n')"
+plan "3 $(seq -s " " 4 2 24) 25" laptop > $WORK/laptop/plan.md
+laptop commit -qam "The laptop's plan" && laptop push -q
+tap "Sync"
+await "plan.md"
+tap "Resolve"
+await "Show all 23 lines" 10
+shot resolve-long
+tap "Show all 23 lines"
+shot resolve-long-all
+tap "Show fewer"
+# The pick buttons sit below a long block
+adb shell input swipe 540 1600 540 400
+sleep 1
+tap "Keep this phone's"
+tap "Save"
+await "Sync" 10
+tap "Sync"
+sleep 2
+await "Synced"
+laptop pull -q
+grep -q "Step 5, as the phone sees it" $WORK/laptop/plan.md && ! grep -q "laptop sees it" $WORK/laptop/plan.md || fail "the phone's plan did not reach the laptop"
+
 echo "== Both change a photo, and the phone deletes a note the laptop edits"
 png 40,110,220 > $WORK/phone.png
 adb push $WORK/phone.png $FOLDER/photo.png >/dev/null

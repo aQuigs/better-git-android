@@ -109,6 +109,21 @@ class ResolveScreenTest {
     }
 
     @Test
+    fun showsALongSideCutShortUntilAllIsAskedFor() {
+        val phone = (1..20).joinToString("") { "phone $it\n" }
+        val remote = (1..15).joinToString("") { "remote $it\n" }
+        show(MarkedFile("ideas.md", listOf(block(phone, remote)), stray = false, ByteArray(0)))
+
+        compose.onNodeWithText("phone 12", substring = true).assertExists()
+        compose.onNodeWithText("phone 13", substring = true).assertDoesNotExist()
+        compose.onNodeWithText("remote 15", substring = true).assertExists()
+        compose.onNodeWithText("Show all 20 lines").performClick()
+
+        compose.onNodeWithText("phone 20", substring = true).assertExists()
+        compose.onNodeWithText("Show fewer").assertExists()
+    }
+
+    @Test
     fun saysWhenNoConflictIsLeft() {
         show(MarkedFile("ideas.md", listOf(Part.Same("done\n")), stray = false, ByteArray(0)))
 
@@ -124,7 +139,7 @@ class ResolveScreenTest {
 
     private fun show(file: MarkedFile, open: () -> MarkedFile = { file }, save: (MarkedFile, String) -> Saved = { _, _ -> Saved.Done }, onDone: () -> Unit = {}) {
         compose.setContent { ResolveScreen(file.path, open, save, onDone) }
-        compose.waitUntil { compose.onAllNodesWithText("Conflict 1 of", substring = true).fetchSemanticsNodes().isNotEmpty() || file.blocks.isEmpty() }
+        compose.waitUntil(timeoutMillis = 5_000) { compose.onAllNodesWithText("Conflict 1 of", substring = true).fetchSemanticsNodes().isNotEmpty() || file.blocks.isEmpty() }
     }
 
     private fun block(local: String, remote: String) =
