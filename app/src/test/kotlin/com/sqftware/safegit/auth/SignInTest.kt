@@ -7,8 +7,10 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.yield
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.IOException
@@ -39,6 +41,31 @@ class SignInTest {
         store.session = Session(octo, "tok")
 
         assertEquals(SignIn.State.SignedIn(octo), settle(signIn(FakeFlow())))
+    }
+
+    @Test
+    fun aTokenThatCannotBeReadYetIsNeverTakenForSignedOut() = runBlocking {
+        store.session = Session(octo, "tok")
+        store.failures = 1
+        val signIn = SignIn(FakeFlow(), store, this, wait = { yield() })
+
+        assertThrows(IOException::class.java) { signIn.credentials() }
+
+        assertEquals(SignIn.State.SignedIn(octo), settle(signIn))
+        assertEquals("1", signIn.credentials().environment()["GIT_CONFIG_COUNT"])
+    }
+
+    @Test
+    fun aTokenThatStaysUnreadableLetsTheUserSignInAnew() = runBlocking {
+        store.session = Session(octo, "tok")
+        store.failures = Int.MAX_VALUE
+        val signIn = SignIn(FakeFlow(Poll.Granted("new")), store, this, wait = { yield() })
+
+        signIn.state.first { it is SignIn.State.Failed }
+        signIn.signIn()
+
+        assertEquals(SignIn.State.SignedIn(octo), signIn.state.first { it is SignIn.State.SignedIn })
+        assertEquals(Session(octo, "new"), store.session)
     }
 
     @Test
@@ -161,7 +188,16 @@ class SignInTest {
     private class MemoryStore : TokenStore {
         var session: Session? = null
 
-        override fun load() = session
+        /** How many loads still fail, as the Keystore does at times. */
+        var failures = 0
+
+        override fun load(): Session? {
+            if (failures > 0) {
+                failures--
+                throw IOException("Keystore busy")
+            }
+            return session
+        }
 
         override fun save(session: Session) {
             this.session = session

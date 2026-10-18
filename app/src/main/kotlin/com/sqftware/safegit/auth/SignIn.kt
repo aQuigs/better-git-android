@@ -51,10 +51,13 @@ class SignIn(
     private var read = false
 
     init {
-        scope.launch { current.value = session()?.let { State.SignedIn(it.account) } ?: signedOut() }
+        scope.launch { readSaved() }
     }
 
-    /** Blocks on the first call, which reads the store. */
+    /**
+     * Blocks on the first call, which reads the store, and throws [IOException] while a saved token cannot be read: a sync
+     * sent without it would fail as if the sign-in were refused.
+     */
     fun credentials(): Credentials = token()?.let { TokenCredentials(GITHUB, it) } ?: Credentials.NONE
 
     /** The signed-in account's token, for the host's API; blocks like [credentials]. */
@@ -162,10 +165,33 @@ class SignIn(
         }
     }
 
+    // A read that failed is left unremembered, so the next call tries again
     @Synchronized
     private fun session(): Session? {
         if (!read) remember(store.load())
         return session
+    }
+
+    /**
+     * Shows the saved account once it can be read. Until then, after a few tries, it shows the failure, so the user can
+     * sign in anew if the token stays unreadable. A sign-in or sign-out meanwhile has the say.
+     */
+    private suspend fun readSaved() {
+        var shown: State = State.Loading
+        var seconds = 1
+        while (true) {
+            val saved = try {
+                session()
+            } catch (e: IOException) {
+                val failed = State.Failed(e.message ?: e.toString())
+                if (seconds >= FAIL_AFTER_SECONDS && current.compareAndSet(shown, failed)) shown = failed
+                wait(seconds)
+                seconds = (seconds * 2).coerceAtMost(MAX_RETRY_SECONDS)
+                continue
+            }
+            current.compareAndSet(shown, saved?.let { State.SignedIn(it.account) } ?: signedOut())
+            return
+        }
     }
 
     @Synchronized
@@ -180,5 +206,7 @@ class SignIn(
 
     private companion object {
         const val GITHUB = "https://github.com/"
+        const val FAIL_AFTER_SECONDS = 8
+        const val MAX_RETRY_SECONDS = 60
     }
 }
