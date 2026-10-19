@@ -3,10 +3,14 @@ package com.sqftware.safegit.auth
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import com.sqftware.safegit.storage.writeAtomically
+import org.json.JSONException
 import org.json.JSONObject
 import java.io.File
+import java.io.IOException
 import java.security.KeyStore
+import java.security.KeyStoreException
 import java.util.Base64
+import javax.crypto.AEADBadTagException
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
@@ -22,20 +26,34 @@ class KeystoreTokenStore(private val file: File) : TokenStore {
         if (!file.exists()) return null
         return try {
             val json = JSONObject(file.readText())
+            // Android 11's Keystore answers no key when it cannot be reached, so a missing one is not taken as gone
+            val key = savedKey() ?: throw KeyStoreException("no key")
             val cipher = Cipher.getInstance(TRANSFORMATION)
-            cipher.init(Cipher.DECRYPT_MODE, key(), GCMParameterSpec(128, decode(json.getString("iv"))))
+            cipher.init(Cipher.DECRYPT_MODE, key, GCMParameterSpec(128, decode(json.getString("iv"))))
             val token = String(cipher.doFinal(decode(json.getString("token"))))
             Session(Account(json.getString("login"), json.getLong("id"), json.optString("name").takeIf { !json.isNull("name") }), token)
-        } catch (_: Exception) {
-            // The key is gone, as after the app's data was partly cleared, or the file is damaged: the user signs in
-            // again, rather than the app failing at every start
+        } catch (_: JSONException) {
             null
+        } catch (_: IllegalArgumentException) {
+            null
+        } catch (_: AEADBadTagException) {
+            // Encrypted under another key
+            null
+        } catch (e: Exception) {
+            // The Keystore fails for a while at times, as when the app starts in the background; taking that for
+            // signed out would send the next sync without the token
+            throw IOException("the saved sign-in can't be read (${e.javaClass.simpleName}: ${e.message})", e)
         }
     }
 
     @Synchronized
     override fun save(session: Session) {
-        val cipher = Cipher.getInstance(TRANSFORMATION).apply { init(Cipher.ENCRYPT_MODE, key()) }
+        // A key that fails is replaced, as the token it held is being replaced too
+        val cipher = try {
+            encrypter(savedKey() ?: newKey())
+        } catch (_: Exception) {
+            encrypter(newKey())
+        }
         val json = JSONObject()
             .put("login", session.account.login)
             .put("id", session.account.id)
@@ -50,10 +68,12 @@ class KeystoreTokenStore(private val file: File) : TokenStore {
         file.delete()
     }
 
-    private fun key(): SecretKey {
-        val keyStore = KeyStore.getInstance(KEYSTORE).apply { load(null) }
-        (keyStore.getKey(ALIAS, null) as? SecretKey)?.let { return it }
-        return KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, KEYSTORE).apply {
+    private fun encrypter(key: SecretKey) = Cipher.getInstance(TRANSFORMATION).apply { init(Cipher.ENCRYPT_MODE, key) }
+
+    private fun savedKey() = KeyStore.getInstance(KEYSTORE).apply { load(null) }.getKey(ALIAS, null) as? SecretKey
+
+    private fun newKey(): SecretKey =
+        KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, KEYSTORE).apply {
             init(
                 KeyGenParameterSpec.Builder(ALIAS, KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT)
                     .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
@@ -61,7 +81,6 @@ class KeystoreTokenStore(private val file: File) : TokenStore {
                     .build(),
             )
         }.generateKey()
-    }
 
     private fun encode(bytes: ByteArray) = Base64.getEncoder().encodeToString(bytes)
 
