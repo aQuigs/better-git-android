@@ -69,8 +69,12 @@
     <string name="history_conflicts">Conflicted files</string>
     <string name="history_pulled_files">Pulled</string>
     <string name="history_pushed_files">Pushed</string>
-    <string name="history_pick_file">Restore a file…</string>
-    <string name="history_pick_outside">Pick a file inside %1$s</string>
+    <string name="files_title">File versions</string>
+    <string name="files_search">Search files</string>
+    <string name="files_up">‹ %1$s</string>
+    <string name="files_empty">No files yet</string>
+    <string name="files_none">No matching files</string>
+    <string name="files_load_failed">Couldn\'t read the files: %1$s</string>
 
     <string name="versions_title">Versions</string>
     <string name="versions_empty">No versions yet</string>

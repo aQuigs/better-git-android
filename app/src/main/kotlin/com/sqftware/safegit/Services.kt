@@ -101,6 +101,8 @@ class Services private constructor(context: Context) {
         null
     }
 
+    fun files(saved: SavedRepo) = history(saved).files()
+
     fun versions(saved: SavedRepo, path: String) = history(saved).of(path)
 
     /** Null when it cannot be read, as the version can still be restored without it. */

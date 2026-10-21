@@ -21,6 +21,38 @@ data class FileVersions(val current: String?, val versions: List<PastVersion>, v
     fun canRestore(version: PastVersion) = !held && version.blob != null && version.blob != current
 }
 
+/** The files that have versions: those the folder holds, and [deleted], those it no longer does. */
+data class RepoFiles(val files: List<String>, val deleted: List<String>) {
+    /**
+     * A folder by its path ending in "/", or a file, and its [name] within its folder; a folder is [deleted] when all its
+     * files are.
+     */
+    data class Entry(val path: String, val name: String, val deleted: Boolean = false) {
+        val folder get() = path.endsWith('/')
+    }
+
+    /** What [folder] ("" for the top, otherwise ending in "/") holds: its folders, then its files. */
+    fun inFolder(folder: String): List<Entry> {
+        val inside = all().filter { it.first.startsWith(folder) }
+        val folders = inside.filter { '/' in it.first.removePrefix(folder) }
+            .groupBy { it.first.removePrefix(folder).substringBefore('/') }
+            .map { (name, files) -> Entry("$folder$name/", "$name/", files.all { it.second }) }
+        val files = inside.filter { '/' !in it.first.removePrefix(folder) }.map { (path, deleted) -> Entry(path, path.removePrefix(folder), deleted) }
+        return folders + files
+    }
+
+    /** Every file whose path holds [query], ignoring case, each named by its whole path. */
+    fun matching(query: String) = all().filter { it.first.contains(query, ignoreCase = true) }.map { (path, deleted) -> Entry(path, path, deleted) }
+
+    // As file managers sort, deleted files among the others
+    private fun all() = (files.map { it to false } + deleted.map { it to true }).sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER) { it.first })
+
+    companion object {
+        /** The folder holding [folder], "" for the top. */
+        fun parent(folder: String) = folder.removeSuffix("/").substringBeforeLast('/', "").let { if (it.isEmpty()) "" else "$it/" }
+    }
+}
+
 /**
  * A file's past versions in [repo], and putting one back in the folder as an edit, which the next sync commits like any
  * other. The branch and its history are never touched. Callers keep syncs of the repo from running meanwhile.
@@ -41,12 +73,36 @@ class FileHistory(git: Git, repo: Repo) {
 
     private val git = RepoGit(git, repo, NOBODY)
     private val previews = ChoicePreviews(git, repo)
+    private val workTree = repo.workTree
+
+    /**
+     * Every file that has versions: those the branch holds, and those it deleted, unless the folder holds them again (a
+     * restore not synced yet). A deleted name another file now has but for case is left out: on storage that ignores
+     * case it is that file.
+     */
+    fun files(): RepoFiles {
+        val head = git.head() ?: return RepoFiles(emptyList(), emptyList())
+        val tip = tip(head)
+        // Entries are "<mode> <type> <object>" then a tab and the path
+        val tracked = git.check("ls-tree", "-r", "-z", tip).stdout.paths()
+            .filter { it.substringBefore(' ') in Change.FILE_MODES }
+            .map { it.substringAfter('\t') }
+        // Raw entries, each ":<old mode> <new mode> <old blob> <new blob> D" and a path
+        val log = git.check(
+            "log", "-z", "--diff-merges=first-parent", "--no-renames", "--diff-filter=D", "--raw", "--no-abbrev", "--format=", tip,
+        ).stdout.split('\u0000')
+        val present = tracked.mapTo(HashSet()) { it.lowercase() }
+        val (back, deleted) = log.indices.mapNotNull { i ->
+            val token = log[i].trimStart('\n')
+            log.getOrNull(i + 1)?.takeIf { token.startsWith(":") && token.removePrefix(":").substringBefore(' ') in Change.FILE_MODES }
+        }.distinct().filter { it.lowercase() !in present }.partition { workTree.resolve(it).isFile }
+        return RepoFiles(tracked + back, deleted)
+    }
 
     fun of(path: String): FileVersions {
         val head = git.head() ?: return FileVersions(null, emptyList())
-        // A held conflict's markers are this device's working state, never a version anyone kept
         val held = HeldConflict.isHeld(git, head)
-        val tip = if (held) "$head^" else head
+        val tip = tip(head)
         // Every version a merge left, even one that took a single side's, and those of the side it dropped
         val log = git.check(
             "--literal-pathspecs", "log", "-z", "--full-history", "--diff-merges=first-parent", "--no-renames", "--raw", "--no-abbrev",
@@ -105,6 +161,9 @@ class FileHistory(git: Git, repo: Repo) {
             is FolderUpdate.Result.WriteFailed -> throw IOException(written.detail)
         }
     }
+
+    // A held conflict's markers are this device's working state, never a version anyone kept
+    private fun tip(head: String) = if (HeldConflict.isHeld(git, head)) "$head^" else head
 
     /** The mode and object of what [commit] holds at [path], or null for nothing. */
     private fun last(commit: String, path: String): Pair<String, String>? =

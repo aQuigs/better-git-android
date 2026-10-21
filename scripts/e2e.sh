@@ -2,7 +2,7 @@
 # Drives the debug build on the emulator through a whole sync story against a repo this Mac serves, playing the laptop
 # itself: connect an empty folder, sync, conflict on one line, resolve it on the resolve screen, then choose a version of a binary.
 # Then automatic syncs: one pulls, one waits while a file is being saved, and one leaves a conflict for the user.
-# Last, the sync history, and restoring a deleted note from it once the conflict is resolved.
+# Last, the sync history, and finding a deleted note in the repo's files to restore it once the conflict is resolved.
 # Wipes the app's data and /sdcard/Documents/Notes. Shots land in screenshots/e2e/.
 # Usage: ./gradlew assembleDebug && scripts/emulator-lock.sh scripts/e2e.sh   (VARIANT=release after assembleRelease)
 
@@ -340,13 +340,16 @@ tap "Sync"
 sleep 2
 await "Synced"
 
-echo "== Restore the note the phone deleted, as the laptop last had it"
+echo "== Find the note the phone deleted in the repo's files, and restore it as the laptop last had it"
 tap "More options"
-tap "Sync history"
-scroll_to "Pushed: 1 changed, 1 deleted ▾"
-tap "Pushed: 1 changed, 1 deleted ▾"
-scroll_to "daily/2026-10-13.md"
-tap "daily/2026-10-13.md"
+tap "File versions"
+await "Search files" 10
+await "daily/" 10
+shot files
+tap "daily/"
+await "2026-10-13.md" 10
+shot files-folder
+tap "2026-10-13.md"
 await "Versions" 10
 shot versions
 tap "Laptop · Laptop's photo and note ▾"
@@ -357,16 +360,17 @@ await "Restored. The next sync commits it." 10
 shot restored
 adb shell "grep -q 'on the laptop too' $FOLDER/daily/2026-10-13.md" || fail "the laptop's version was not restored"
 
-echo "== Pick a file in the repo's folder"
+echo "== Search the repo's files"
 adb shell input keyevent KEYCODE_BACK
-await "Restore a file…" 10
-tap "Restore a file…"
-await "ideas.md" 15
+await "‹ Notes" 10
+tap "Search files"
+adb shell input text ideas
+await "ideas.md" 10
+shot files-search
 tap "ideas.md"
 await "Versions" 10
 await "Current" 10
-adb shell input keyevent KEYCODE_BACK
-adb shell input keyevent KEYCODE_BACK
+for _ in 1 2 3 4 5; do shown "Add a repo" && break; adb shell input keyevent KEYCODE_BACK; sleep 1; done
 await "Add a repo" 10
 
 echo "== The next sync pushes the restored note"

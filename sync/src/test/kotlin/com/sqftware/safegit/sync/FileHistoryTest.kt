@@ -193,6 +193,70 @@ class FileHistoryTest {
         assertTrue(subjects.toString(), "Laptop edit" in subjects && "Other edit" in subjects)
     }
 
+    @Test
+    fun listsTheFilesWithVersionsAndThoseDeletedByFolder() {
+        write("ideas.md", "one\n")
+        write("Notes/day.md", "one\n")
+        write("Notes/old.md", "one\n")
+        write("gone/only.md", "one\n")
+        write("back.md", "one\n")
+        sync()
+        delete("Notes/old.md")
+        delete("gone/only.md")
+        delete("back.md")
+        sync()
+        write("back.md", "two\n")
+        sync()
+
+        val files = history().files()
+
+        assertEquals(setOf("back.md", "ideas.md", "Notes/day.md"), files.files.toSet())
+        assertEquals(setOf("gone/only.md", "Notes/old.md"), files.deleted.toSet())
+        assertEquals(
+            listOf(
+                RepoFiles.Entry("gone/", "gone/", deleted = true),
+                RepoFiles.Entry("Notes/", "Notes/"),
+                RepoFiles.Entry("back.md", "back.md"),
+                RepoFiles.Entry("ideas.md", "ideas.md"),
+            ),
+            files.inFolder(""),
+        )
+        assertEquals(listOf(RepoFiles.Entry("Notes/day.md", "day.md"), RepoFiles.Entry("Notes/old.md", "old.md", deleted = true)), files.inFolder("Notes/"))
+        assertEquals(listOf(RepoFiles.Entry("Notes/day.md", "Notes/day.md"), RepoFiles.Entry("Notes/old.md", "Notes/old.md", deleted = true)), files.matching("notes"))
+        assertEquals("Notes/", RepoFiles.parent("Notes/2026/"))
+        assertEquals("", RepoFiles.parent("Notes/"))
+    }
+
+    @Test
+    fun listsARestoredFileAsTheFolderHoldsIt() {
+        write("notes.md", "one\n")
+        sync()
+        delete("notes.md")
+        sync()
+        assertEquals(listOf("notes.md"), history().files().deleted)
+
+        assertEquals(Restored.DONE, restoreOldest("notes.md"))
+
+        assertEquals(RepoFiles(listOf("notes.md"), emptyList()), history().files())
+    }
+
+    @Test
+    fun leavesOutADeletedNameAnotherFileHasButForCase() {
+        write("notes.md", "one\n")
+        sync()
+        laptop("Rename by case") {
+            git.ok(this, "mv", "notes.md", "Notes.md")
+        }
+        sync()
+
+        assertEquals(RepoFiles(listOf("Notes.md"), emptyList()), history().files())
+    }
+
+    @Test
+    fun listsNoFilesBeforeTheFirstCommit() {
+        assertEquals(RepoFiles(emptyList(), emptyList()), history().files())
+    }
+
     /** Two laptops edit different lines, and the second merges the first's push with [strategy]. */
     private fun mergeOnLaptop(vararg strategy: String) {
         write("notes.md", "a\nb\nc\n")

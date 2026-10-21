@@ -10,7 +10,6 @@ import com.sqftware.safegit.sync.SyncResult
 import com.sqftware.safegit.sync.Transfer
 import com.sqftware.safegit.work.RecordedSync
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -50,18 +49,15 @@ class HistoryScreenTest {
     }
 
     @Test
-    fun opensAFilesVersionsFromASyncOrThePicker() {
+    fun opensAFilesVersionsFromASync() {
         var opened: String? = null
-        var picked = false
         val sync = RecordedSync(1000, automatic = false, SyncResult.Synced(1, 1), Transfer(pulled, pushed))
-        compose.setContent { HistoryScreen("notes", listOf(sync), onFile = { opened = it }, onPickFile = { picked = true }) }
+        compose.setContent { HistoryScreen("notes", listOf(sync), onFile = { opened = it }) }
 
         compose.onNodeWithText("Pulled: 1 changed, 1 new\nPushed: 1 deleted ▾").performClick()
         compose.onNodeWithText("old.md").performClick()
-        compose.onNodeWithText("Restore a file…").performClick()
 
         assertEquals("old.md", opened)
-        assertTrue(picked)
     }
 
     @Test

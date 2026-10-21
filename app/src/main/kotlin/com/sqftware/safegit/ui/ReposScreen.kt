@@ -83,6 +83,7 @@ fun ReposScreen(
     onMessage: (SavedRepo, String) -> Unit = { _, _ -> },
     device: String = "",
     onHistory: (SavedRepo) -> Unit = {},
+    onFiles: (SavedRepo) -> Unit = {},
     onAbout: () -> Unit = {},
     all: AllRun? = null,
     onSyncAll: () -> Unit = {},
@@ -112,6 +113,7 @@ fun ReposScreen(
                     device,
                     preview = { preview(row.repo, it) },
                     onHistory = { onHistory(row.repo) },
+                    onFiles = { onFiles(row.repo) },
                     onResolve = { onResolve(row.repo, it) },
                 )
             }
@@ -131,13 +133,14 @@ private fun RepoCard(
     device: String,
     preview: (Choice) -> ChoicePreview?,
     onHistory: () -> Unit,
+    onFiles: () -> Unit,
     onResolve: (String) -> Unit,
 ) {
     Card(Modifier.fillMaxWidth().padding(bottom = 12.dp)) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Row {
                 Box(Modifier.weight(1f)) { RepoTitle(row.repo) }
-                RepoMenu(row.repo.message, onMessage, device, onHistory)
+                RepoMenu(row.repo.message, onMessage, device, onHistory, onFiles)
             }
             // Here rather than with the choices, so picks made outlast a sync that runs meanwhile, such as an automatic one
             val kept = remember(row.repo.id) { mutableStateMapOf<Choice, Keep>() }
@@ -205,11 +208,11 @@ private fun PendingFiles(pending: FileChanges) {
 private const val EXAMPLE_FILES = 3
 
 /**
- * What the repo offers beyond syncing, kept off the card: its history, and its seldom changed settings, for now its
- * commit message template, edited with an example of what it writes on [device].
+ * What the repo offers beyond syncing, kept off the card: its history, its files' versions, and its seldom changed
+ * settings, for now its commit message template, edited with an example of what it writes on [device].
  */
 @Composable
-private fun RepoMenu(message: String, onMessage: (String) -> Unit, device: String, onHistory: () -> Unit) {
+private fun RepoMenu(message: String, onMessage: (String) -> Unit, device: String, onHistory: () -> Unit, onFiles: () -> Unit) {
     var open by remember { mutableStateOf(false) }
     var draft by rememberSaveable { mutableStateOf<String?>(null) }
     Box {
@@ -222,6 +225,13 @@ private fun RepoMenu(message: String, onMessage: (String) -> Unit, device: Strin
                 onClick = {
                     open = false
                     onHistory()
+                },
+            )
+            DropdownMenuItem(
+                text = { Text(stringResource(R.string.files_title)) },
+                onClick = {
+                    open = false
+                    onFiles()
                 },
             )
             DropdownMenuItem(
