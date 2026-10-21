@@ -1,6 +1,7 @@
 package com.sqftware.safegit.ui
 
 import android.graphics.Bitmap
+import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
@@ -9,7 +10,9 @@ import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.hasAnyDescendant
 import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.isSelected
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextReplacement
@@ -419,5 +422,12 @@ class ReposScreenTest {
         compose.onNodeWithText("Add a repo").performClick()
 
         assertEquals(true, added)
+    }
+
+    @Test
+    fun marksTheRepoWhoseScreenIsOpenBesideTheList() {
+        compose.setContent { ReposScreen(listOf(RepoRow(vault, null), RepoRow(journal, null)), onSync = { _, _ -> }, onAdd = {}, selected = journal.id) }
+
+        compose.onNode(isSelected()).assert(hasAnyDescendant(hasText("journal")))
     }
 }

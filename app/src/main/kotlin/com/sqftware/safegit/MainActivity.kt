@@ -26,10 +26,12 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.listSaver
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
@@ -52,6 +54,7 @@ import com.sqftware.safegit.ui.AccountCard
 import com.sqftware.safegit.ui.AddRepoScreen
 import com.sqftware.safegit.ui.FilesScreen
 import com.sqftware.safegit.ui.HistoryScreen
+import com.sqftware.safegit.ui.ListDetail
 import com.sqftware.safegit.ui.RepoRow
 import com.sqftware.safegit.ui.ReposScreen
 import com.sqftware.safegit.ui.ResolveScreen
@@ -101,42 +104,89 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+/** What opens from the repo list: beside it on a wide window, in its place on a phone. */
+private sealed interface Detail {
+    data object Add : Detail
+    data object About : Detail
+    data class History(val repo: String) : Detail
+    data class Files(val repo: String) : Detail
+    /** The repo's id and the path of the marked file open */
+    data class Resolve(val repo: String, val path: String) : Detail
+
+    companion object {
+        val saver = listSaver<Detail?, String>(
+            save = {
+                when (it) {
+                    null -> emptyList()
+                    Add -> listOf("add")
+                    About -> listOf("about")
+                    is History -> listOf("history", it.repo)
+                    is Files -> listOf("files", it.repo)
+                    is Resolve -> listOf("resolve", it.repo, it.path)
+                }
+            },
+            restore = {
+                when (it.firstOrNull()) {
+                    "add" -> Add
+                    "about" -> About
+                    "history" -> History(it[1])
+                    "files" -> Files(it[1])
+                    "resolve" -> Resolve(it[1], it[2])
+                    else -> null
+                }
+            },
+        )
+    }
+}
+
+private val Detail?.repo get() = when (this) {
+    is Detail.History -> repo
+    is Detail.Files -> repo
+    is Detail.Resolve -> repo
+    else -> null
+}
+
 @Composable
 private fun App(services: Services) {
-    var adding by rememberSaveable { mutableStateOf(false) }
-    var about by rememberSaveable { mutableStateOf(false) }
-    var history by rememberSaveable { mutableStateOf<String?>(null) }
-    var files by rememberSaveable { mutableStateOf<String?>(null) }
-    // The repo's id and the path of the marked file open
-    var resolving by rememberSaveable { mutableStateOf<Pair<String, String>?>(null) }
+    var detail by rememberSaveable(stateSaver = Detail.saver) { mutableStateOf(null) }
     val connecting by services.connector.state.collectAsState()
 
     // Also when the user left the add screen while it connected
     LaunchedEffect(connecting) {
         if (connecting is Connector.State.Connected) {
             services.connector.reset()
-            adding = false
+            if (detail == Detail.Add) detail = null
         }
     }
 
-    val historyOf = history
-    val filesOf = files
-    val resolve = resolving
-    when {
-        adding -> AddRepo(services, connecting, onDone = { adding = false })
-        about -> About(services, onDone = { about = false })
-        historyOf != null -> History(services, historyOf, onDone = { history = null })
-        filesOf != null -> Files(services, filesOf, onDone = { files = null })
-        resolve != null -> Resolve(services, resolve.first, resolve.second, onDone = { resolving = null })
-        else -> Repos(
-            services,
-            onAdd = { adding = true },
-            onAbout = { about = true },
-            onHistory = { history = it.id },
-            onFiles = { files = it.id },
-            onResolve = { repo, path -> resolving = repo.id to path },
-        )
-    }
+    val close = { detail = null }
+    ListDetail(
+        list = {
+            Repos(
+                services,
+                open = detail.repo,
+                onAdd = { detail = Detail.Add },
+                onAbout = { detail = Detail.About },
+                onHistory = { detail = Detail.History(it.id) },
+                onFiles = { detail = Detail.Files(it.id) },
+                onResolve = { repo, path -> detail = Detail.Resolve(repo.id, path) },
+            )
+        },
+        detail = when (val shown = detail) {
+            null -> null
+            // Keyed, so a screen opened for another repo or file starts afresh rather than with what this one remembered
+            else -> { { key(shown) { DetailScreen(services, shown, connecting, close) } } }
+        },
+    )
+}
+
+@Composable
+private fun DetailScreen(services: Services, detail: Detail, connecting: Connector.State, onDone: () -> Unit) = when (detail) {
+    Detail.Add -> AddRepo(services, connecting, onDone)
+    Detail.About -> About(services, onDone)
+    is Detail.History -> History(services, detail.repo, onDone)
+    is Detail.Files -> Files(services, detail.repo, onDone)
+    is Detail.Resolve -> Resolve(services, detail.repo, detail.path, onDone)
 }
 
 @Composable
@@ -275,6 +325,7 @@ private fun Resolve(services: Services, id: String, path: String, onDone: () -> 
 @Composable
 private fun Repos(
     services: Services,
+    open: String?,
     onAdd: () -> Unit,
     onAbout: () -> Unit,
     onHistory: (SavedRepo) -> Unit,
@@ -312,6 +363,7 @@ private fun Repos(
         onCloseAll = services.syncer::closeAll,
         preview = services::preview,
         onResolve = onResolve,
+        selected = open,
         header = {
             AccountCard(
                 account,

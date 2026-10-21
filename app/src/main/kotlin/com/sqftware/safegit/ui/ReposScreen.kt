@@ -1,5 +1,6 @@
 package com.sqftware.safegit.ui
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -41,6 +42,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
@@ -70,7 +72,8 @@ data class RepoRow(val repo: SavedRepo, val state: SyncState?, val canSignIn: Bo
 /**
  * The connected repos, under [header], such as the account syncs run as; [onSignIn] replaces a sign-in a remote refused.
  * With more than one, they can all be synced at once; [all] is the last such sync. [preview] reads what each side of a
- * choice holds, off the main thread, or null when it cannot. [onResolve] opens a file a conflict marked.
+ * choice holds, off the main thread, or null when it cannot. [onResolve] opens a file a conflict marked. The card of
+ * the repo [selected] stands out, for a screen of its open beside the list.
  */
 @Composable
 fun ReposScreen(
@@ -91,6 +94,7 @@ fun ReposScreen(
     onCloseAll: () -> Unit = {},
     preview: (SavedRepo, Choice) -> ChoicePreview? = { _, _ -> null },
     onResolve: (SavedRepo, String) -> Unit = { _, _ -> },
+    selected: String? = null,
     header: @Composable () -> Unit = {},
 ) {
     Scaffold(
@@ -115,6 +119,7 @@ fun ReposScreen(
                     onHistory = { onHistory(row.repo) },
                     onFiles = { onFiles(row.repo) },
                     onResolve = { onResolve(row.repo, it) },
+                    selected = row.repo.id == selected,
                 )
             }
             item { TextButton(onClick = onAbout) { Text(stringResource(R.string.about_open)) } }
@@ -135,8 +140,12 @@ private fun RepoCard(
     onHistory: () -> Unit,
     onFiles: () -> Unit,
     onResolve: (String) -> Unit,
+    selected: Boolean,
 ) {
-    Card(Modifier.fillMaxWidth().padding(bottom = 12.dp)) {
+    Card(
+        Modifier.fillMaxWidth().padding(bottom = 12.dp).semantics { this.selected = selected },
+        border = if (selected) BorderStroke(2.dp, MaterialTheme.colorScheme.primary) else null,
+    ) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Row {
                 Box(Modifier.weight(1f)) { RepoTitle(row.repo) }
