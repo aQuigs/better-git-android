@@ -327,7 +327,7 @@ shot history-open
 echo "== No restore while a conflict holds this phone's edits"
 tap "welcome.md"
 await "Versions" 10
-await "This repo has a conflict to resolve. Edit the conflicted files and sync first, so this phone's changes are kept, then restore." 10
+await "Resolve the conflict and sync first" 10
 tap "Laptop · Laptop again ▾"
 await "This version" 10
 shot restore-conflict
@@ -353,7 +353,7 @@ tap "Laptop · Laptop's photo and note ▾"
 await "Restore this version" 10
 shot version-open
 tap "Restore this version"
-await "Restored. The next sync commits it as a new edit; every version stays in the history." 10
+await "Restored. The next sync commits it." 10
 shot restored
 adb shell "grep -q 'on the laptop too' $FOLDER/daily/2026-10-13.md" || fail "the laptop's version was not restored"
 

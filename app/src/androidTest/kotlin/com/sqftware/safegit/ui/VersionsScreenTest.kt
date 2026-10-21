@@ -71,7 +71,7 @@ class VersionsScreenTest {
         compose.setContent { VersionsScreen("notes/day.md", versions.copy(held = true), preview = { preview }, onRestore = {}) }
 
         compose.onNodeWithText(
-            "This repo has a conflict to resolve. Edit the conflicted files and sync first, so this phone's changes are kept, then restore.",
+            "Resolve the conflict and sync first",
         ).assertExists()
         compose.onNodeWithText("Ann · Laptop edit ▾").performClick()
         compose.onNodeWithText("This version").assertExists()
@@ -84,7 +84,7 @@ class VersionsScreenTest {
         compose.setContent { VersionsScreen("notes/day.md", versions, preview = { preview }, onRestore = {}, outcome = outcome) }
 
         compose.onNodeWithText(
-            "This file has changed since you opened its versions, or since the last sync. Sync first, so that change is kept too, then restore.",
+            "The file changed. Sync first, then restore.",
         ).assertExists()
     }
 
@@ -99,6 +99,6 @@ class VersionsScreenTest {
     fun saysWhenAFileHasNoVersionsYet() {
         compose.setContent { VersionsScreen("new.md", FileVersions(null, emptyList()), preview = { null }, onRestore = {}) }
 
-        compose.onNodeWithText("No versions yet. A file has versions once a sync has committed it.").assertExists()
+        compose.onNodeWithText("No versions yet").assertExists()
     }
 }
