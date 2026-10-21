@@ -69,6 +69,27 @@
     <string name="history_conflicts">Conflicted files</string>
     <string name="history_pulled_files">Pulled</string>
     <string name="history_pushed_files">Pushed</string>
+    <string name="files_title">File versions</string>
+    <string name="files_search">Search files</string>
+    <string name="files_up">‹ %1$s</string>
+    <string name="files_empty">No files yet</string>
+    <string name="files_none">No matching files</string>
+    <string name="files_load_failed">Couldn\'t read the files: %1$s</string>
+
+    <string name="versions_title">Versions</string>
+    <string name="versions_empty">No versions yet</string>
+    <string name="versions_current">Current</string>
+    <string name="versions_by">%1$s · %2$s</string>
+    <string name="versions_now">Now</string>
+    <string name="versions_then">This version</string>
+    <string name="versions_restore">Restore this version</string>
+    <string name="versions_unreadable">Can\'t show this version</string>
+    <string name="versions_restored">Restored. The next sync commits it.</string>
+    <string name="versions_changed">The file changed. Sync first, then restore.</string>
+    <string name="versions_conflict">Resolve the conflict and sync first</string>
+    <string name="versions_load_failed">Couldn\'t read this file\'s versions: %1$s</string>
+    <string name="versions_in_the_way">Something else is at this path now</string>
+    <string name="versions_failed">Couldn\'t restore: %1$s</string>
     <string name="state_cancelled">Sync stopped before it finished. Nothing was lost, and the next sync picks up where this one left off.</string>
     <string name="state_conflict">Conflicts to resolve, then sync</string>
     <string name="state_conflict_ahead">Both sides changed the same lines of these files. An automatic sync leaves them as they are. Sync to put both versions in each file, then edit it to keep what you want.</string>

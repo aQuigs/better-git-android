@@ -2,6 +2,7 @@
 # Drives the debug build on the emulator through a whole sync story against a repo this Mac serves, playing the laptop
 # itself: connect an empty folder, sync, conflict on one line, resolve it on the resolve screen, then choose a version of a binary.
 # Then automatic syncs: one pulls, one waits while a file is being saved, and one leaves a conflict for the user.
+# Last, the sync history, and finding a deleted note in the repo's files to restore it once the conflict is resolved.
 # Wipes the app's data and /sdcard/Documents/Notes. Shots land in screenshots/e2e/.
 # Usage: ./gradlew assembleDebug && scripts/emulator-lock.sh scripts/e2e.sh   (VARIANT=release after assembleRelease)
 
@@ -322,7 +323,61 @@ shot history
 tap "Pulled: 1 changed ▾"
 await "Conflicted files" 10
 shot history-open
+
+echo "== No restore while a conflict holds this phone's edits"
+tap "welcome.md"
+await "Versions" 10
+await "Resolve the conflict and sync first" 10
+tap "Laptop · Laptop again ▾"
+await "This version" 10
+shot restore-conflict
+shown "Restore this version" && fail "offered a restore while a conflict was held"
+adb shell input keyevent KEYCODE_BACK
 adb shell input keyevent KEYCODE_BACK
 await "Add a repo" 10
+phone_writes welcome.md '# Welcome\n\nThese notes sync with SafeGit.\n\nToday: both again.\n'
+tap "Sync"
+sleep 2
+await "Synced"
+
+echo "== Find the note the phone deleted in the repo's files, and restore it as the laptop last had it"
+tap "More options"
+tap "File versions"
+await "Search files" 10
+await "daily/" 10
+shot files
+tap "daily/"
+await "2026-10-13.md" 10
+shot files-folder
+tap "2026-10-13.md"
+await "Versions" 10
+shot versions
+tap "Laptop · Laptop's photo and note ▾"
+await "Restore this version" 10
+shot version-open
+tap "Restore this version"
+await "Restored. The next sync commits it." 10
+shot restored
+adb shell "grep -q 'on the laptop too' $FOLDER/daily/2026-10-13.md" || fail "the laptop's version was not restored"
+
+echo "== Search the repo's files"
+adb shell input keyevent KEYCODE_BACK
+await "‹ Notes" 10
+tap "Search files"
+adb shell input text ideas
+await "ideas.md" 10
+shot files-search
+tap "ideas.md"
+await "Versions" 10
+await "Current" 10
+for _ in 1 2 3 4 5; do shown "Add a repo" && break; adb shell input keyevent KEYCODE_BACK; sleep 1; done
+await "Add a repo" 10
+
+echo "== The next sync pushes the restored note"
+tap "Sync"
+sleep 2
+await "Synced"
+laptop pull -q
+grep -q "on the laptop too" $WORK/laptop/daily/2026-10-13.md || fail "the restored note did not reach the laptop"
 
 echo "E2E passed; shots in $OUT"

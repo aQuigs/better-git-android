@@ -9,6 +9,7 @@ import com.sqftware.safegit.sync.Problem
 import com.sqftware.safegit.sync.SyncResult
 import com.sqftware.safegit.sync.Transfer
 import com.sqftware.safegit.work.RecordedSync
+import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -45,6 +46,18 @@ class HistoryScreenTest {
         compose.onNodeWithText("laptop.md").assertExists()
         compose.onNodeWithText("ideas.md").assertExists()
         compose.onNodeWithText("old.md").assertExists()
+    }
+
+    @Test
+    fun opensAFilesVersionsFromASync() {
+        var opened: String? = null
+        val sync = RecordedSync(1000, automatic = false, SyncResult.Synced(1, 1), Transfer(pulled, pushed))
+        compose.setContent { HistoryScreen("notes", listOf(sync), onFile = { opened = it }) }
+
+        compose.onNodeWithText("Pulled: 1 changed, 1 new\nPushed: 1 deleted ▾").performClick()
+        compose.onNodeWithText("old.md").performClick()
+
+        assertEquals("old.md", opened)
     }
 
     @Test

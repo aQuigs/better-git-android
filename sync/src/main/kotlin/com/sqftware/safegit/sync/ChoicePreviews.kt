@@ -33,12 +33,15 @@ data class ChoicePreview(val local: Version, val remote: Version, val diff: List
 class ChoicePreviews(git: Git, repo: Repo) {
     private val git = RepoGit(git, repo, NOBODY)
 
-    fun of(choice: Choice): ChoicePreview {
-        val objects = objects(listOfNotNull(choice.local, choice.remote))
-        val local = version(choice.path, choice.local, objects)
-        val remote = version(choice.path, choice.remote, objects)
-        val diff = if (local is Version.Text && remote is Version.Text) diff(choice.remote!!, choice.local!!) else emptyList()
-        return ChoicePreview(local, remote, diff)
+    fun of(choice: Choice) = between(choice.path, choice.local, choice.remote)
+
+    /** What [path] holds as the objects [local] and [remote], each null for no file there. */
+    fun between(path: String, local: String?, remote: String?): ChoicePreview {
+        val objects = objects(listOfNotNull(local, remote))
+        val localVersion = version(path, local, objects)
+        val remoteVersion = version(path, remote, objects)
+        val diff = if (localVersion is Version.Text && remoteVersion is Version.Text) diff(remote!!, local!!) else emptyList()
+        return ChoicePreview(localVersion, remoteVersion, diff)
     }
 
     /** Each object's type and size by id, leaving out those this repo lacks, which git reports as "<id> missing". */

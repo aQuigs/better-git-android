@@ -117,6 +117,10 @@ internal class Change(val path: String, val oldMode: String, val newMode: String
     companion object {
         const val ABSENT = "000000"
         const val GITLINK = "160000"
+        const val FILE = "100644"
+
+        /** A plain file's modes, executable or not; neither a symlink nor a submodule. */
+        val FILE_MODES = setOf(FILE, "100755")
     }
 }
 

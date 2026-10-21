@@ -21,9 +21,12 @@ import com.sqftware.safegit.repos.SavedRepo
 import com.sqftware.safegit.sync.Choice
 import com.sqftware.safegit.sync.ChoicePreview
 import com.sqftware.safegit.sync.ChoicePreviews
+import com.sqftware.safegit.sync.FileHistory
+import com.sqftware.safegit.sync.FileVersions
 import com.sqftware.safegit.sync.Identity
 import com.sqftware.safegit.sync.MarkedFile
 import com.sqftware.safegit.sync.MarkedFiles
+import com.sqftware.safegit.sync.PastVersion
 import com.sqftware.safegit.sync.Repo
 import com.sqftware.safegit.work.AutoSchedule
 import com.sqftware.safegit.work.FileSyncHistory
@@ -98,6 +101,17 @@ class Services private constructor(context: Context) {
         null
     }
 
+    fun files(saved: SavedRepo) = history(saved).files()
+
+    fun versions(saved: SavedRepo, path: String) = history(saved).of(path)
+
+    /** Null when it cannot be read, as the version can still be restored without it. */
+    fun preview(saved: SavedRepo, path: String, versions: FileVersions, version: PastVersion): ChoicePreview? = try {
+        history(saved).preview(path, versions, version)
+    } catch (_: Exception) {
+        null
+    }
+
     fun saveMarked(saved: SavedRepo, file: MarkedFile, text: String): MarkedFiles.Saved = try {
         marked(saved) { save(file, text) }
     } catch (e: Exception) {
@@ -106,6 +120,13 @@ class Services private constructor(context: Context) {
 
     private fun <T> marked(saved: SavedRepo, action: MarkedFiles.() -> T): T =
         synchronized(locks.of(saved.id)) { MarkedFiles(git, repo(saved), device).action() }
+
+    /** Under the repo's lock, as a sync moving the folder meanwhile would meet a file it did not write. */
+    fun restore(saved: SavedRepo, path: String, versions: FileVersions, version: PastVersion): FileHistory.Restored =
+        synchronized(locks.of(saved.id)) { history(saved).restore(path, versions, version) }
+            .also { if (it == FileHistory.Restored.DONE) outgoing.changed(saved) }
+
+    private fun history(saved: SavedRepo) = FileHistory(git, repo(saved))
 
     private fun gitDir(id: String) = gitDirs.resolve("$id.git")
 

@@ -16,6 +16,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.dynamicDarkColorScheme
@@ -43,14 +44,19 @@ import com.sqftware.safegit.repos.SavedRepo
 import com.sqftware.safegit.storage.AllFilesAccess
 import com.sqftware.safegit.storage.StorageAccess
 import com.sqftware.safegit.storage.folderOf
+import com.sqftware.safegit.sync.FileVersions
+import com.sqftware.safegit.sync.RepoFiles
 import com.sqftware.safegit.ui.AboutScreen
 import com.sqftware.safegit.ui.AccessScreen
 import com.sqftware.safegit.ui.AccountCard
 import com.sqftware.safegit.ui.AddRepoScreen
+import com.sqftware.safegit.ui.FilesScreen
 import com.sqftware.safegit.ui.HistoryScreen
 import com.sqftware.safegit.ui.RepoRow
 import com.sqftware.safegit.ui.ReposScreen
 import com.sqftware.safegit.ui.ResolveScreen
+import com.sqftware.safegit.ui.RestoreOutcome
+import com.sqftware.safegit.ui.VersionsScreen
 import java.io.File
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -100,6 +106,7 @@ private fun App(services: Services) {
     var adding by rememberSaveable { mutableStateOf(false) }
     var about by rememberSaveable { mutableStateOf(false) }
     var history by rememberSaveable { mutableStateOf<String?>(null) }
+    var files by rememberSaveable { mutableStateOf<String?>(null) }
     // The repo's id and the path of the marked file open
     var resolving by rememberSaveable { mutableStateOf<Pair<String, String>?>(null) }
     val connecting by services.connector.state.collectAsState()
@@ -113,17 +120,20 @@ private fun App(services: Services) {
     }
 
     val historyOf = history
+    val filesOf = files
     val resolve = resolving
     when {
         adding -> AddRepo(services, connecting, onDone = { adding = false })
         about -> About(services, onDone = { about = false })
         historyOf != null -> History(services, historyOf, onDone = { history = null })
+        filesOf != null -> Files(services, filesOf, onDone = { files = null })
         resolve != null -> Resolve(services, resolve.first, resolve.second, onDone = { resolving = null })
         else -> Repos(
             services,
             onAdd = { adding = true },
             onAbout = { about = true },
             onHistory = { history = it.id },
+            onFiles = { files = it.id },
             onResolve = { repo, path -> resolving = repo.id to path },
         )
     }
@@ -158,9 +168,96 @@ private fun copy(context: Context, label: String, text: String) =
 private fun History(services: Services, id: String, onDone: () -> Unit) {
     val repos by services.repos.all.collectAsState(null)
     val syncs by remember(id) { services.history.of(id) }.collectAsState(null)
-    BackHandler(onBack = onDone)
+    var file by rememberSaveable { mutableStateOf<String?>(null) }
+    val saved = repos?.find { it.id == id }
+    BackHandler { if (file != null) file = null else onDone() }
 
-    HistoryScreen(repos?.find { it.id == id }?.name.orEmpty(), syncs)
+    val shown = file
+    if (shown != null && saved != null) {
+        Versions(services, saved, shown)
+    } else {
+        HistoryScreen(saved?.name.orEmpty(), syncs, onFile = { file = it })
+    }
+}
+
+@Composable
+private fun Files(services: Services, id: String, onDone: () -> Unit) {
+    val saved = services.repos.all.collectAsState(null).value?.find { it.id == id }
+    var folder by rememberSaveable { mutableStateOf("") }
+    var query by rememberSaveable { mutableStateOf("") }
+    var file by rememberSaveable { mutableStateOf<String?>(null) }
+    var files by remember(id) { mutableStateOf<RepoFiles?>(null) }
+    var unreadable by remember(id) { mutableStateOf<String?>(null) }
+    // Here, so a search and where it was scrolled outlast a look at a file's versions
+    val list = rememberLazyListState()
+    val scope = rememberCoroutineScope()
+    val open = { to: String ->
+        folder = to
+        scope.launch { list.scrollToItem(0) }
+    }
+    // Again on coming back from a file, which a restore may have brought back
+    LaunchedEffect(saved, file == null) {
+        if (saved == null || file != null) return@LaunchedEffect
+        try {
+            files = withContext(Dispatchers.IO) { services.files(saved) }
+        } catch (e: Exception) {
+            unreadable = e.message.orEmpty()
+        }
+    }
+    BackHandler {
+        when {
+            file != null -> file = null
+            query.isNotEmpty() -> query = ""
+            folder.isNotEmpty() -> open(RepoFiles.parent(folder))
+            else -> onDone()
+        }
+    }
+
+    val shown = file
+    if (shown != null && saved != null) {
+        Versions(services, saved, shown)
+    } else {
+        FilesScreen(saved?.name.orEmpty(), files, folder, query, onQuery = { query = it }, onFolder = { open(it) }, onFile = { file = it }, unreadable, list)
+    }
+}
+
+@Composable
+private fun Versions(services: Services, saved: SavedRepo, path: String) {
+    var versions by remember(path) { mutableStateOf<FileVersions?>(null) }
+    var unreadable by remember(path) { mutableStateOf<String?>(null) }
+    var restoring by remember(path) { mutableStateOf(false) }
+    var outcome by remember(path) { mutableStateOf<RestoreOutcome?>(null) }
+    val scope = rememberCoroutineScope()
+    LaunchedEffect(path) {
+        try {
+            versions = withContext(Dispatchers.IO) { services.versions(saved, path) }
+        } catch (e: Exception) {
+            unreadable = e.message.orEmpty()
+        }
+    }
+
+    VersionsScreen(
+        path,
+        versions,
+        preview = { version -> versions?.let { services.preview(saved, path, it, version) } },
+        onRestore = { version ->
+            val seen = versions ?: return@VersionsScreen
+            restoring = true
+            scope.launch {
+                outcome = withContext(Dispatchers.IO) {
+                    try {
+                        RestoreOutcome.Ended(services.restore(saved, path, seen, version))
+                    } catch (e: Exception) {
+                        RestoreOutcome.Failed(e.message.orEmpty())
+                    }
+                }
+                restoring = false
+            }
+        },
+        restoring = restoring,
+        outcome = outcome,
+        unreadable = unreadable,
+    )
 }
 
 @Composable
@@ -176,7 +273,14 @@ private fun Resolve(services: Services, id: String, path: String, onDone: () -> 
 }
 
 @Composable
-private fun Repos(services: Services, onAdd: () -> Unit, onAbout: () -> Unit, onHistory: (SavedRepo) -> Unit, onResolve: (SavedRepo, String) -> Unit) {
+private fun Repos(
+    services: Services,
+    onAdd: () -> Unit,
+    onAbout: () -> Unit,
+    onHistory: (SavedRepo) -> Unit,
+    onFiles: (SavedRepo) -> Unit,
+    onResolve: (SavedRepo, String) -> Unit,
+) {
     val repos by services.repos.all.collectAsState(null)
     val states by services.syncer.states.collectAsState(emptyMap())
     val all by services.syncer.all.collectAsState(null)
@@ -200,6 +304,7 @@ private fun Repos(services: Services, onAdd: () -> Unit, onAbout: () -> Unit, on
         onMessage = services.syncer::setMessage,
         device = services.device,
         onHistory = onHistory,
+        onFiles = onFiles,
         onAbout = onAbout,
         all = all,
         onSyncAll = services.syncer::syncAll,
