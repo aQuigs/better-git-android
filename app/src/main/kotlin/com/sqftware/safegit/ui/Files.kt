@@ -40,11 +40,16 @@ fun FileList(files: FileChanges) {
     }
 }
 
-/** Paths, one to a line. */
+/** Paths, one to a line, each followed by its [action], if any. */
 @Composable
-fun PathList(paths: List<String>) {
+fun PathList(paths: List<String>, action: @Composable (String) -> Unit = {}) {
     Column {
-        for (path in paths) Text(path, fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodyMedium)
+        for (path in paths) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(path, Modifier.weight(1f), fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodyMedium)
+                action(path)
+            }
+        }
     }
 }
 

@@ -97,13 +97,16 @@ class ReposScreenTest {
     }
 
     @Test
-    fun listsTheFilesWithMarkers() {
+    fun listsTheFilesWithMarkersToResolve() {
         val conflict = SyncState.Finished(SyncResult.Conflict(listOf("daily/today.md", "ideas.md")))
-        compose.setContent { ReposScreen(listOf(RepoRow(vault, conflict)), onSync = { _, _ -> }, onAdd = {}) }
+        val resolving = mutableListOf<Pair<SavedRepo, String>>()
+        compose.setContent { ReposScreen(listOf(RepoRow(vault, conflict)), onSync = { _, _ -> }, onAdd = {}, onResolve = { repo, path -> resolving += repo to path }) }
 
         compose.onNodeWithText("daily/today.md").assertExists()
-        compose.onNodeWithText("ideas.md").assertExists()
         compose.onNodeWithText("Sync").assertIsEnabled()
+        compose.onAllNodesWithText("Resolve")[1].performClick()
+
+        assertEquals(listOf(vault to "ideas.md"), resolving)
     }
 
     @Test

@@ -70,7 +70,7 @@ data class RepoRow(val repo: SavedRepo, val state: SyncState?, val canSignIn: Bo
 /**
  * The connected repos, under [header], such as the account syncs run as; [onSignIn] replaces a sign-in a remote refused.
  * With more than one, they can all be synced at once; [all] is the last such sync. [preview] reads what each side of a
- * choice holds, off the main thread, or null when it cannot.
+ * choice holds, off the main thread, or null when it cannot. [onResolve] opens a file a conflict marked.
  */
 @Composable
 fun ReposScreen(
@@ -89,6 +89,7 @@ fun ReposScreen(
     onCancelAll: () -> Unit = {},
     onCloseAll: () -> Unit = {},
     preview: (SavedRepo, Choice) -> ChoicePreview? = { _, _ -> null },
+    onResolve: (SavedRepo, String) -> Unit = { _, _ -> },
     header: @Composable () -> Unit = {},
 ) {
     Scaffold(
@@ -111,6 +112,7 @@ fun ReposScreen(
                     device,
                     preview = { preview(row.repo, it) },
                     onHistory = { onHistory(row.repo) },
+                    onResolve = { onResolve(row.repo, it) },
                 )
             }
             item { TextButton(onClick = onAbout) { Text(stringResource(R.string.about_open)) } }
@@ -129,6 +131,7 @@ private fun RepoCard(
     device: String,
     preview: (Choice) -> ChoicePreview?,
     onHistory: () -> Unit,
+    onResolve: (String) -> Unit,
 ) {
     Card(Modifier.fillMaxWidth().padding(bottom = 12.dp)) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -145,7 +148,7 @@ private fun RepoCard(
                     Text(stringResource(if (state is SyncState.Running) runningText(state) else R.string.state_waiting))
                     LinearProgressIndicator(Modifier.fillMaxWidth())
                 }
-                is SyncState.Finished -> Outcome(state.result, kept, onSync, row.canSignIn, onSignIn, preview)
+                is SyncState.Finished -> Outcome(state.result, kept, onSync, row.canSignIn, onSignIn, preview, onResolve)
             }
             row.pending?.let { PendingFiles(it) }
 
@@ -298,11 +301,14 @@ private fun Outcome(
     canSignIn: Boolean,
     onSignIn: () -> Unit,
     preview: (Choice) -> ChoicePreview?,
+    onResolve: (String) -> Unit,
 ) {
     when (result) {
         SyncResult.UpToDate -> Text(stringResource(R.string.state_up_to_date))
         is SyncResult.Synced -> Text(stringResource(R.string.state_synced))
-        is SyncResult.Conflict -> Paths(stringResource(R.string.state_conflict), result.paths)
+        is SyncResult.Conflict -> Paths(stringResource(R.string.state_conflict), result.paths) { path ->
+            TextButton(onClick = { onResolve(path) }) { Text(stringResource(R.string.resolve_open)) }
+        }
         is SyncResult.ConflictAhead -> Paths(stringResource(R.string.state_conflict_ahead), result.paths)
         is SyncResult.Choose -> Choices(result.choices, kept, onSync, preview)
         is SyncResult.Failed -> {
@@ -314,9 +320,9 @@ private fun Outcome(
 }
 
 @Composable
-private fun Paths(explanation: String, paths: List<String>) {
+private fun Paths(explanation: String, paths: List<String>, action: @Composable (String) -> Unit = {}) {
     Text(explanation)
-    PathList(paths)
+    PathList(paths, action)
 }
 
 /** Asks for a [Keep] for each choice, showing what each side holds, and syncs with them once every one has one. */

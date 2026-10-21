@@ -22,6 +22,8 @@ import com.sqftware.safegit.sync.Choice
 import com.sqftware.safegit.sync.ChoicePreview
 import com.sqftware.safegit.sync.ChoicePreviews
 import com.sqftware.safegit.sync.Identity
+import com.sqftware.safegit.sync.MarkedFile
+import com.sqftware.safegit.sync.MarkedFiles
 import com.sqftware.safegit.sync.Repo
 import com.sqftware.safegit.work.AutoSchedule
 import com.sqftware.safegit.work.FileSyncHistory
@@ -88,6 +90,22 @@ class Services private constructor(context: Context) {
     } catch (_: Exception) {
         null
     }
+
+    /** A file a conflict marked, read while no sync of the repo runs; null when it cannot be read. */
+    fun openMarked(saved: SavedRepo, path: String): MarkedFile? = try {
+        marked(saved) { open(path) }
+    } catch (_: Exception) {
+        null
+    }
+
+    fun saveMarked(saved: SavedRepo, file: MarkedFile, text: String): MarkedFiles.Saved = try {
+        marked(saved) { save(file, text) }
+    } catch (e: Exception) {
+        MarkedFiles.Saved.Failed(e.message.orEmpty())
+    }
+
+    private fun <T> marked(saved: SavedRepo, action: MarkedFiles.() -> T): T =
+        synchronized(locks.of(saved.id)) { MarkedFiles(git, repo(saved), device).action() }
 
     private fun gitDir(id: String) = gitDirs.resolve("$id.git")
 

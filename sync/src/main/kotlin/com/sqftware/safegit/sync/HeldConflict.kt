@@ -43,6 +43,9 @@ internal class HeldConflict(private val git: RepoGit, private val markers: Marke
         return null
     }
 
+    /** The remote's version of [path] in the held conflict, the merge's other side, or null when it has none. */
+    fun remote(path: String): String? = git.resolve("$REF^:$path")
+
     private fun hasMarkers(file: File) = file.isFile && file.useLines { markers.count(it) > 0 }
 
     companion object {
@@ -65,7 +68,9 @@ internal class Markers(device: String) {
     /** Matches either marker line, as an extended regex for `git diff -G`. */
     val pattern = "^(${escape(local)}|${escape(remote)})[[:space:]]*$"
 
-    fun count(lines: Sequence<String>) = lines.count { it.trimEnd() == local || it.trimEnd() == remote }
+    fun count(lines: Sequence<String>) = lines.count(::isMarker)
+
+    fun isMarker(line: String) = line.trimEnd().let { it == local || it == remote }
 
     private fun escape(text: String) = text.replace(Regex("""[\\.\[\]{}()*+?^$|]"""), """\\$0""")
 }

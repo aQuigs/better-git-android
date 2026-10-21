@@ -70,7 +70,7 @@
     <string name="history_pulled_files">Pulled</string>
     <string name="history_pushed_files">Pushed</string>
     <string name="state_cancelled">Sync stopped before it finished. Nothing was lost, and the next sync picks up where this one left off.</string>
-    <string name="state_conflict">Both sides changed the same lines. Each of these files now holds both versions, between lines starting with &lt;&lt;&lt;&lt;&lt;&lt;&lt; and &gt;&gt;&gt;&gt;&gt;&gt;&gt;. Edit them to keep what you want, then sync. Nothing is pushed until then.</string>
+    <string name="state_conflict">Conflicts to resolve, then sync</string>
     <string name="state_conflict_ahead">Both sides changed the same lines of these files. An automatic sync leaves them as they are. Sync to put both versions in each file, then edit it to keep what you want.</string>
     <string name="state_choose">These changes can\'t be combined in one file. Choose which version to keep; nothing has changed yet.</string>
     <string name="side_file">has it</string>
@@ -79,6 +79,27 @@
     <string name="choice_sides">This phone %1$s, the remote %2$s</string>
     <string name="keep_local">Keep this phone\'s</string>
     <string name="keep_remote">Keep the remote\'s</string>
+    <string name="keep_both">Keep both</string>
+    <string name="resolve_open">Resolve</string>
+    <string name="resolve_block">Conflict %1$d of %2$d</string>
+    <string name="resolve_no_lines">No lines</string>
+    <string name="resolve_edit">Edit</string>
+    <string name="resolve_edit_label">What to keep</string>
+    <string name="resolve_save">Save</string>
+    <string name="resolve_save_some">Save these</string>
+    <string name="resolve_cancel">Cancel</string>
+    <string name="resolve_back">Back</string>
+    <string name="resolve_none">No conflicts left</string>
+    <string name="resolve_unreadable">Can\'t open this file here. Edit it in another app.</string>
+    <string name="resolve_changed">The file changed since it was opened, so it wasn\'t saved.</string>
+    <string name="resolve_stray">Some markers can\'t be resolved here. Edit them in another app.</string>
+    <plurals name="resolve_show_all">
+        <item quantity="one">Show all %1$d line</item>
+        <item quantity="other">Show all %1$d lines</item>
+    </plurals>
+    <string name="resolve_show_fewer">Show fewer</string>
+    <string name="resolve_reopen">Open again</string>
+    <string name="resolve_failed">Could not save the file: %1$s</string>
     <string name="preview_phone">This phone</string>
     <string name="preview_remote">The remote</string>
     <string name="preview_deleted">Deleted</string>
