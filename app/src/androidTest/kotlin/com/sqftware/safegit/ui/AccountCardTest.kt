@@ -24,6 +24,7 @@ class AccountCardTest {
         compose.setContent { AccountCard(SignIn.State.Waiting(code), onSignIn = {}, onOpen = { opened += it }, onCancel = {}, onSignOut = {}) }
 
         compose.onNodeWithText("WDJB-MJHT").assertExists()
+        compose.onNodeWithText("Checking with GitHub…").assertExists()
         compose.onNodeWithText("Copy code and open GitHub").performClick()
 
         assertEquals(listOf(code), opened)

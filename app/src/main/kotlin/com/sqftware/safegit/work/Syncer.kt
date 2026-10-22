@@ -63,6 +63,9 @@ interface Syncer {
 
     fun sync(repo: SavedRepo, choices: Map<Choice, Keep> = emptyMap())
 
+    /** Syncs again each repo at a URL [reached] whose last sync failed on the sign-in, once a new one is granted. */
+    fun syncRefused(reached: (url: String) -> Boolean)
+
     /** Stops [repo]'s running sync as soon as that is safe; it ends [SyncResult.Cancelled]. */
     fun cancel(repo: SavedRepo)
 
@@ -121,6 +124,14 @@ class WorkSyncer(
         scope.launch(Dispatchers.IO) {
             records.saveChoices(repo.id, choices)
             work.enqueueUniqueWork("sync-${repo.id}", ExistingWorkPolicy.KEEP, request(repo))
+        }
+    }
+
+    override fun syncRefused(reached: (url: String) -> Boolean) {
+        scope.launch(Dispatchers.IO) {
+            repos.all.first()
+                .filter { reached(it.url) && (records.result(it.id) as? SyncResult.Failed)?.problem == Problem.SIGN_IN }
+                .forEach { sync(it) }
         }
     }
 

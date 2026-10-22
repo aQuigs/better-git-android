@@ -183,6 +183,7 @@
     <string name="account_starting">Asking GitHub for a code…</string>
     <string name="account_enter_code">Enter this code on GitHub to let SafeGit in:</string>
     <string name="account_open">Copy code and open GitHub</string>
+    <string name="account_checking">Checking with GitHub…</string>
     <string name="account_signed_in">Signed in to GitHub as %1$s</string>
     <string name="account_sign_out">Sign out</string>
     <string name="account_failed">Couldn\'t sign in: %1$s</string>
