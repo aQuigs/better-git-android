@@ -7,6 +7,7 @@
     <string name="access_grant">Allow access</string>
 
     <string name="repos_empty">Connect a folder to a git repo to start syncing it.</string>
+    <string name="pane_empty">History, files and conflicts open here.</string>
     <string name="repos_add">Add a repo</string>
     <string name="repo_branch">Branch: %1$s</string>
     <string name="sync">Sync</string>
