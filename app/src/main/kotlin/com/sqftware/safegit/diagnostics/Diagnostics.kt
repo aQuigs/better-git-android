@@ -75,6 +75,6 @@ class Diagnostics(
             put(account.login, "<account>")
             account.name?.let { put(it, "<account>") }
         }
-        runCatching { signIn.token() }.getOrNull()?.let { put(it, "<secret>") }
+        runCatching { signIn.savedToken() }.getOrNull()?.let { put(it, "<secret>") }
     }
 }

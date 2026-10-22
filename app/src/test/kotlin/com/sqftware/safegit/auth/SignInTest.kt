@@ -1,6 +1,7 @@
 package com.sqftware.safegit.auth
 
 import com.sqftware.safegit.sync.Credentials
+import com.sqftware.safegit.sync.TokenCredentials
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -24,7 +25,7 @@ class SignInTest {
 
     @Test
     fun signsInAndSyncsAsTheAccount() = runBlocking {
-        val signIn = signIn(FakeFlow(Poll.Pending, IOException("dropped"), Poll.SlowDown(10), Poll.Granted("tok")))
+        val signIn = signIn(FakeFlow(Poll.Pending, IOException("dropped"), Poll.SlowDown(10), Poll.Granted(Grant("tok"))))
         settle(signIn)
 
         signIn.signIn()
@@ -59,7 +60,7 @@ class SignInTest {
     fun aTokenThatStaysUnreadableLetsTheUserSignInAnew() = runBlocking {
         store.session = Session(octo, "tok")
         store.failures = Int.MAX_VALUE
-        val signIn = SignIn(FakeFlow(Poll.Granted("new")), store, this, wait = { yield() })
+        val signIn = SignIn(FakeFlow(Poll.Granted(Grant("new"))), store, this, wait = { yield() })
 
         signIn.state.first { it is SignIn.State.Failed }
         signIn.signIn()
@@ -85,7 +86,7 @@ class SignInTest {
     @Test
     fun signingInAgainReplacesTheToken() = runBlocking {
         store.session = Session(octo, "revoked")
-        val signIn = signIn(FakeFlow(Poll.Granted("tok")))
+        val signIn = signIn(FakeFlow(Poll.Granted(Grant("tok"))))
         settle(signIn)
 
         assertTrue(signIn.canSignInAgain("https://github.com/octo/notes.git", signIn.state.value))
@@ -100,7 +101,7 @@ class SignInTest {
     fun signingInAgainLeavesASignInUnderWayToFinish() = runBlocking {
         store.session = Session(octo, "old")
         val polled = CompletableDeferred<Unit>()
-        val signIn = SignIn(FakeFlow(Poll.Granted("tok")), store, this, wait = { polled.await() })
+        val signIn = SignIn(FakeFlow(Poll.Granted(Grant("tok"))), store, this, wait = { polled.await() })
         settle(signIn)
         signIn.signIn()
         signIn.state.first { it is SignIn.State.Waiting }
@@ -135,10 +136,12 @@ class SignInTest {
 
             override fun poll(code: DeviceCode): Poll {
                 release.await()
-                return Poll.Granted("tok")
+                return Poll.Granted(Grant("tok"))
             }
 
             override fun account(token: String) = octo.also { accountRead.countDown() }
+
+            override fun renew(refreshToken: String) = throw AssertionError("renewed")
         }
         val signIn = SignIn(flow, store, CoroutineScope(Dispatchers.IO), wait = {})
         settle(signIn)
@@ -149,6 +152,89 @@ class SignInTest {
         release.countDown()
         assertTrue(accountRead.await(5, TimeUnit.SECONDS))
         delay(300)
+
+        assertEquals(SignIn.State.SignedOut, signIn.state.value)
+        assertEquals(null, store.session)
+    }
+
+    @Test
+    fun keepsWhatRenewsTheToken() = runBlocking {
+        val signIn = signIn(FakeFlow(Poll.Granted(Grant("tok", Renewal("r1", NOW + HOURS_8)))))
+        settle(signIn)
+
+        signIn.signIn()
+
+        signIn.state.first { it is SignIn.State.SignedIn }
+        assertEquals(Session(octo, "tok", Renewal("r1", NOW + HOURS_8)), store.session)
+    }
+
+    @Test
+    fun usesATokenUntilItIsAboutToExpire() = runBlocking {
+        store.session = Session(octo, "tok", Renewal("r1", NOW + HOURS_8))
+        val flow = FakeFlow()
+
+        assertEquals("tok", signIn(flow).token())
+        assertEquals(emptyList<String>(), flow.renewed)
+    }
+
+    @Test
+    fun renewsATokenAboutToExpireAndSyncsWithTheNewOne() = runBlocking {
+        store.session = Session(octo, "old", Renewal("r1", NOW + 60_000))
+        val flow = FakeFlow(renewals = listOf(Grant("new", Renewal("r2", NOW + HOURS_8))))
+        val signIn = signIn(flow)
+
+        val header = signIn.credentials().environment()["GIT_CONFIG_VALUE_0"]
+        assertEquals("new", signIn.token())
+
+        assertEquals(TokenCredentials("https://github.com/", "new").environment()["GIT_CONFIG_VALUE_0"], header)
+        assertEquals(listOf("r1"), flow.renewed)
+        assertEquals(Session(octo, "new", Renewal("r2", NOW + HOURS_8)), store.session)
+    }
+
+    @Test
+    fun offlineItSyncsWithTheOldTokenAndRenewsLater() = runBlocking {
+        val saved = Session(octo, "old", Renewal("r1", NOW - 1))
+        store.session = saved
+        val flow = FakeFlow(renewals = listOf(IOException("offline"), Grant("new", Renewal("r2", NOW + HOURS_8))))
+        val signIn = signIn(flow)
+
+        assertEquals("old", signIn.token())
+        assertEquals(saved, store.session)
+
+        assertEquals("new", signIn.token())
+        assertEquals(listOf("r1", "r1"), flow.renewed)
+    }
+
+    @Test
+    fun anErrorFromGitHubStopsTheSyncAndKeepsTheRefreshToken() = runBlocking {
+        val saved = Session(octo, "old", Renewal("r1", NOW - 1))
+        store.session = saved
+        val signIn = signIn(FakeFlow(renewals = listOf(RenewalRefused("unsupported_grant_type"))))
+
+        assertThrows(RenewalRefused::class.java) { signIn.credentials() }
+        assertEquals(saved, store.session)
+    }
+
+    @Test
+    fun aRenewalThatCannotBeSavedIsSavedOnTheNextUse() = runBlocking {
+        store.session = Session(octo, "old", Renewal("r1", NOW - 1))
+        store.saveFailures = 1
+        val signIn = signIn(FakeFlow(renewals = listOf(Grant("new", Renewal("r2", NOW + HOURS_8)))))
+
+        assertEquals("new", signIn.token())
+        assertEquals("old", store.session?.token)
+
+        assertEquals("new", signIn.token())
+        assertEquals(Session(octo, "new", Renewal("r2", NOW + HOURS_8)), store.session)
+    }
+
+    @Test
+    fun aRenewalGitHubRefusesSignsOut() = runBlocking {
+        store.session = Session(octo, "old", Renewal("r1", NOW - 1))
+        val signIn = signIn(FakeFlow(renewals = listOf(null)))
+        settle(signIn)
+
+        assertEquals(Credentials.NONE, signIn.credentials())
 
         assertEquals(SignIn.State.SignedOut, signIn.state.value)
         assertEquals(null, store.session)
@@ -166,13 +252,18 @@ class SignInTest {
         assertEquals(SignIn.State.Unavailable, settle(SignIn(null, store, this)))
     }
 
-    private fun CoroutineScope.signIn(flow: DeviceFlow) = SignIn(flow, store, this, wait = {})
+    private fun CoroutineScope.signIn(flow: DeviceFlow) = SignIn(flow, store, this, wait = {}, clock = { NOW })
 
     private suspend fun settle(signIn: SignIn) = signIn.state.first { it != SignIn.State.Loading }
 
-    /** Answers each poll with the next of [polls], throwing the exceptions among them. */
-    private inner class FakeFlow(vararg polls: Any) : DeviceFlow {
+    /**
+     * Answers each poll with the next of [polls], and each renewal with the next of [renewals] (a [Grant], or null for
+     * one refused), throwing the exceptions among them.
+     */
+    private inner class FakeFlow(vararg polls: Any, renewals: List<Any?> = emptyList()) : DeviceFlow {
         private val polls = ArrayDeque(polls.toList())
+        private val renewals = ArrayDeque(renewals)
+        val renewed = mutableListOf<String>()
 
         override fun start() = code
 
@@ -183,6 +274,15 @@ class SignInTest {
         }
 
         override fun account(token: String) = octo
+
+        override fun renew(refreshToken: String): Grant? {
+            renewed += refreshToken
+            if (renewals.isEmpty()) throw AssertionError("renewed too often")
+            return when (val next = renewals.removeFirst()) {
+                is Exception -> throw next
+                else -> next as Grant?
+            }
+        }
     }
 
     private class MemoryStore : TokenStore {
@@ -199,12 +299,24 @@ class SignInTest {
             return session
         }
 
+        /** How many saves still fail, as a full disk does. */
+        var saveFailures = 0
+
         override fun save(session: Session) {
+            if (saveFailures > 0) {
+                saveFailures--
+                throw IOException("No space left on device")
+            }
             this.session = session
         }
 
         override fun clear() {
             session = null
         }
+    }
+
+    private companion object {
+        const val NOW = 1_800_000_000_000L
+        const val HOURS_8 = 8 * 60 * 60 * 1000L
     }
 }

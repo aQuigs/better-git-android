@@ -22,6 +22,7 @@ class SignIn(
     private val store: TokenStore,
     private val scope: CoroutineScope,
     private val wait: suspend (seconds: Int) -> Unit = { delay(it * 1000L) },
+    private val clock: () -> Long = System::currentTimeMillis,
 ) {
     sealed interface State {
         data object Loading : State
@@ -49,22 +50,28 @@ class SignIn(
 
     private var session: Session? = null
     private var read = false
+    private val renewing = Any()
+    private var unsaved: Session? = null
 
     init {
         scope.launch { readSaved() }
     }
 
     /**
-     * Blocks on the first call, which reads the store, and throws [IOException] while a saved token cannot be read: a sync
-     * sent without it would fail as if the sign-in were refused.
+     * Blocks on the first call, which reads the store, and on renewing a token about to expire. Throws [IOException]
+     * while a saved token cannot be read, or GitHub answers its renewal with an error: a sync sent without it would fail
+     * as if the sign-in were refused.
      */
     fun credentials(): Credentials = token()?.let { TokenCredentials(GITHUB, it) } ?: Credentials.NONE
 
     /** The signed-in account's token, for the host's API; blocks like [credentials]. */
     fun token(): String? = session()?.token
 
+    /** The token as last saved, never renewed, to take out of a bug report. Blocks on the first call, which reads the store. */
+    fun savedToken(): String? = saved()?.token
+
     /** Who commits: the account by its private GitHub email, or the app on [device] before sign-in. */
-    fun identity(device: String): Identity = session()?.account?.let {
+    fun identity(device: String): Identity = saved()?.account?.let {
         // Git refuses a name with no letters or digits, such as one that is all punctuation
         val name = it.name?.takeIf { name -> name.any(Char::isLetterOrDigit) } ?: it.login
         Identity(name, "${it.id}+${it.login}@users.noreply.github.com")
@@ -140,7 +147,7 @@ class SignIn(
             when (poll) {
                 Poll.Pending -> Unit
                 is Poll.SlowDown -> interval = poll.interval
-                is Poll.Granted -> return Session(flow.account(poll.token), poll.token)
+                is Poll.Granted -> return Session(flow.account(poll.grant.token), poll.grant.token, poll.grant.renewal)
                 is Poll.Ended -> throw Ended(poll.reason)
             }
         }
@@ -165,9 +172,57 @@ class SignIn(
         }
     }
 
+    /**
+     * The saved session, renewed first when its token is about to expire. A refresh token works once, so renewals take
+     * turns; they hold their own lock, as the network is no place to keep the buttons on the screen waiting.
+     */
+    private fun session(): Session? = synchronized(renewing) {
+        val saved = saved() ?: return null
+        saveRenewed()
+        val renewal = saved.renewal?.takeIf { clock() >= it.expiresAt - RENEW_BEFORE_MILLIS } ?: return saved
+        val flow = flow ?: return saved
+        val grant = try {
+            flow.renew(renewal.refreshToken)
+        } catch (e: RenewalRefused) {
+            throw e
+        } catch (_: IOException) {
+            // Most likely offline, so git then fails as a fetch does, once the sync has committed
+            return saved
+        }
+        renewed(saved, grant)
+    }
+
+    // A sign-in or sign-out during the renewal has the say
+    @Synchronized
+    private fun renewed(saved: Session, grant: Grant?): Session? {
+        if (session !== saved) return session
+        if (grant == null) {
+            store.clear()
+            remember(null)
+            if (!signingIn()) current.value = signedOut()
+            return null
+        }
+        val renewed = saved.copy(token = grant.token, renewal = grant.renewal)
+        remember(renewed)
+        unsaved = renewed
+        saveRenewed()
+        return renewed
+    }
+
+    // GitHub retired the saved refresh token as it granted the new one, so a save that fails is tried again until it lands
+    @Synchronized
+    private fun saveRenewed() {
+        val renewed = unsaved ?: return
+        try {
+            if (renewed === session) store.save(renewed)
+            unsaved = null
+        } catch (_: Exception) {
+        }
+    }
+
     // A read that failed is left unremembered, so the next call tries again
     @Synchronized
-    private fun session(): Session? {
+    private fun saved(): Session? {
         if (!read) remember(store.load())
         return session
     }
@@ -181,7 +236,7 @@ class SignIn(
         var seconds = 1
         while (true) {
             val saved = try {
-                session()
+                saved()
             } catch (e: IOException) {
                 val failed = State.Failed(e.message ?: e.toString())
                 if (seconds >= FAIL_AFTER_SECONDS && current.compareAndSet(shown, failed)) shown = failed
@@ -208,5 +263,8 @@ class SignIn(
         const val GITHUB = "https://github.com/"
         const val FAIL_AFTER_SECONDS = 8
         const val MAX_RETRY_SECONDS = 60
+
+        // Longer than a sync takes, so a token never expires halfway through one
+        const val RENEW_BEFORE_MILLIS = 10 * 60 * 1000L
     }
 }

@@ -28,10 +28,8 @@ class KeystoreTokenStore(private val file: File) : TokenStore {
             val json = JSONObject(file.readText())
             // Android 11's Keystore answers no key when it cannot be reached, so a missing one is not taken as gone
             val key = savedKey() ?: throw KeyStoreException("no key")
-            val cipher = Cipher.getInstance(TRANSFORMATION)
-            cipher.init(Cipher.DECRYPT_MODE, key, GCMParameterSpec(128, decode(json.getString("iv"))))
-            val token = String(cipher.doFinal(decode(json.getString("token"))))
-            Session(Account(json.getString("login"), json.getLong("id"), json.optString("name").takeIf { !json.isNull("name") }), token)
+            val renewal = if (json.has("refresh")) Renewal(json.open(key, "refresh", "refreshIv"), json.getLong("expiresAt")) else null
+            Session(Account(json.getString("login"), json.getLong("id"), json.optString("name").takeIf { !json.isNull("name") }), json.open(key, "token", "iv"), renewal)
         } catch (_: JSONException) {
             null
         } catch (_: IllegalArgumentException) {
@@ -49,17 +47,17 @@ class KeystoreTokenStore(private val file: File) : TokenStore {
     @Synchronized
     override fun save(session: Session) {
         // A key that fails is replaced, as the token it held is being replaced too
-        val cipher = try {
-            encrypter(savedKey() ?: newKey())
+        val key = try {
+            (savedKey() ?: newKey()).also(::encrypter)
         } catch (_: Exception) {
-            encrypter(newKey())
+            newKey()
         }
         val json = JSONObject()
             .put("login", session.account.login)
             .put("id", session.account.id)
             .put("name", session.account.name ?: JSONObject.NULL)
-            .put("iv", encode(cipher.iv))
-            .put("token", encode(cipher.doFinal(session.token.toByteArray())))
+            .seal(key, "token", "iv", session.token)
+        session.renewal?.let { json.seal(key, "refresh", "refreshIv", it.refreshToken).put("expiresAt", it.expiresAt) }
         file.writeAtomically(json.toString())
     }
 
@@ -69,6 +67,18 @@ class KeystoreTokenStore(private val file: File) : TokenStore {
     }
 
     private fun encrypter(key: SecretKey) = Cipher.getInstance(TRANSFORMATION).apply { init(Cipher.ENCRYPT_MODE, key) }
+
+    // Each secret gets a cipher of its own, as GCM must never reuse an IV under one key
+    private fun JSONObject.seal(key: SecretKey, name: String, iv: String, secret: String): JSONObject {
+        val cipher = encrypter(key)
+        return put(iv, encode(cipher.iv)).put(name, encode(cipher.doFinal(secret.toByteArray())))
+    }
+
+    private fun JSONObject.open(key: SecretKey, name: String, iv: String): String {
+        val cipher = Cipher.getInstance(TRANSFORMATION)
+        cipher.init(Cipher.DECRYPT_MODE, key, GCMParameterSpec(128, decode(getString(iv))))
+        return String(cipher.doFinal(decode(getString(name))))
+    }
 
     private fun savedKey() = KeyStore.getInstance(KEYSTORE).apply { load(null) }.getKey(ALIAS, null) as? SecretKey
 
