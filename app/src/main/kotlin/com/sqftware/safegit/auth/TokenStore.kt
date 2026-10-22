@@ -13,7 +13,7 @@ interface TokenStore {
     fun clear()
 }
 
-/** An account signed in, with the token git sends for it. */
-data class Session(val account: Account, val token: String) {
+/** An account signed in, with the token git sends for it and what renews that token, if it expires. */
+data class Session(val account: Account, val token: String, val renewal: Renewal? = null) {
     override fun toString() = "Session(${account.login})"
 }

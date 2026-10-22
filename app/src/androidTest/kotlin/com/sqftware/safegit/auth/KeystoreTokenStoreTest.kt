@@ -22,6 +22,16 @@ class KeystoreTokenStoreTest {
     }
 
     @Test
+    fun keepsTheRefreshTokenEncryptedToo() {
+        val renewing = session.copy(renewal = Renewal("ghr_secret", 1_800_000_000_000))
+
+        KeystoreTokenStore(file).save(renewing)
+
+        assertEquals(renewing, KeystoreTokenStore(file).load())
+        assertFalse("ghr_secret" in file.readText())
+    }
+
+    @Test
     fun forgetsItOnSignOut() {
         KeystoreTokenStore(file).apply {
             save(session)
