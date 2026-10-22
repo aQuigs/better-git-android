@@ -127,11 +127,13 @@ class WorkSyncer(
         }
     }
 
+    // Unattended, as the user may still be in the browser: a conflict is asked about rather than marked in a note open meanwhile.
+    // Appended, since a sync queued before the grant ran without it
     override fun syncRefused(reached: (url: String) -> Boolean) {
         scope.launch(Dispatchers.IO) {
             repos.all.first()
                 .filter { reached(it.url) && (records.result(it.id) as? SyncResult.Failed)?.problem == Problem.SIGN_IN }
-                .forEach { sync(it) }
+                .forEach { work.enqueueUniqueWork("sync-${it.id}", ExistingWorkPolicy.APPEND_OR_REPLACE, request(it, run = Run.SIGNED_IN)) }
         }
     }
 
@@ -163,10 +165,10 @@ class WorkSyncer(
         }
     }
 
-    private fun request(repo: SavedRepo, all: String? = null) = OneTimeWorkRequestBuilder<SyncWorker>()
+    private fun request(repo: SavedRepo, all: String? = null, run: Run = Run.USER) = OneTimeWorkRequestBuilder<SyncWorker>()
         .addTag(TAG)
         .addTag("$REPO_TAG${repo.id}")
-        .setInputData(workDataOf(SyncWorker.REPO to repo.id, SyncWorker.ALL to all))
+        .setInputData(workDataOf(SyncWorker.REPO to repo.id, SyncWorker.ALL to all, SyncWorker.RUN to run.name))
         // Before Android 12, expedited work runs as a foreground service, which needs a notification of its own
         .apply { if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) setExpedited(OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST) }
         .build()
@@ -223,7 +225,7 @@ class SyncWorker(context: Context, params: WorkerParameters) : CoroutineWorker(c
             if (isStopped) return Result.success()
             // Not a failure, which would fail the rest of a sync-all chain
             val saved = runBlocking { services.repos.all.first() }.find { it.id == id } ?: return Result.success()
-            if (automatic && saved.auto == AutoSync.OFF) return Result.success()
+            if ((run == Run.PERIODIC || run == Run.AGAIN) && saved.auto == AutoSync.OFF) return Result.success()
 
             val result = sync(services, saved, automatic, cancellation)
             if (result == null) {
