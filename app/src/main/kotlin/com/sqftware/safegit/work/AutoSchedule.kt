@@ -12,8 +12,8 @@ import com.sqftware.safegit.repos.SavedRepo
 import kotlin.time.Duration
 import kotlin.time.toJavaDuration
 
-/** Who started a run of [SyncWorker]. */
-enum class Run { USER, PERIODIC, AGAIN }
+/** Who started a run of [SyncWorker]; [SIGNED_IN] is a new sign-in, again for a sync the old one failed. */
+enum class Run { USER, PERIODIC, AGAIN, SIGNED_IN }
 
 /**
  * Schedules a repo's automatic syncs as WorkManager work: one periodic, and a one-off when a run should come sooner

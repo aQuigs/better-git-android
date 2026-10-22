@@ -3,7 +3,9 @@ package com.sqftware.safegit.auth
 import com.sqftware.safegit.sync.Credentials
 import com.sqftware.safegit.sync.TokenCredentials
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.first
@@ -35,6 +37,19 @@ class SignInTest {
         assertEquals("Octo Cat", signIn.identity("Pixel").name)
         assertEquals("42+octo@users.noreply.github.com", signIn.identity("Pixel").email)
         assertEquals("1", signIn.credentials().environment()["GIT_CONFIG_COUNT"])
+    }
+
+    @Test
+    fun saysWhenASignInIsGrantedButNotWhenTheSavedOneIsRead() = runBlocking {
+        store.session = Session(octo, "old")
+        val signIn = signIn(FakeFlow(Poll.Granted(Grant("tok"))))
+        val granted = async(start = CoroutineStart.UNDISPATCHED) { signIn.granted.first() }
+        settle(signIn)
+        assertFalse(granted.isCompleted)
+
+        signIn.signInAgain()
+
+        assertEquals(octo, granted.await())
     }
 
     @Test

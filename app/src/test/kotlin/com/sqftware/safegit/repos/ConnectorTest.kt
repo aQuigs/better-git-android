@@ -38,6 +38,8 @@ class ConnectorTest {
             synced += repo
         }
 
+        override fun syncRefused(reached: (url: String) -> Boolean) = Unit
+
         override fun cancel(repo: SavedRepo) = Unit
 
         override fun setAuto(repo: SavedRepo, auto: AutoSync) = Unit

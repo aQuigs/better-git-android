@@ -7,7 +7,9 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import java.io.IOException
@@ -44,6 +46,11 @@ class SignIn(
 
     private val current = MutableStateFlow<State>(State.Loading)
     val state: StateFlow<State> = current
+
+    private val grants = MutableSharedFlow<Account>(extraBufferCapacity = 1)
+
+    /** Each account a sign-in is granted for, unlike [state] never the saved one read at start. */
+    val granted: SharedFlow<Account> = grants
 
     private var job: Job? = null
     private var attempt = 0
@@ -126,7 +133,10 @@ class SignIn(
 
     /** Whether [signInAgain] can help a remote at [url] that refused the sign-in: the token goes there, and in [state] none is under way. */
     fun canSignInAgain(url: String, state: State) =
-        url.startsWith(GITHUB) && (state is State.SignedIn || state == State.SignedOut || state is State.Failed)
+        reaches(url) && (state is State.SignedIn || state == State.SignedOut || state is State.Failed)
+
+    /** Whether the token goes to a remote at [url]. */
+    fun reaches(url: String) = url.startsWith(GITHUB)
 
     private fun signingIn() = current.value == State.Starting || current.value is State.Waiting
 
@@ -166,6 +176,7 @@ class SignIn(
             val session = outcome.getOrThrow()
             store.save(session)
             remember(session)
+            grants.tryEmit(session.account)
             State.SignedIn(session.account)
         } catch (e: Exception) {
             State.Failed(e.message ?: e.toString())

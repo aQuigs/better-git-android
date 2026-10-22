@@ -44,6 +44,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.launch
 
 /** What the app's parts share, built once per process. */
 class Services private constructor(context: Context) {
@@ -77,6 +78,12 @@ class Services private constructor(context: Context) {
     val schedule = AutoSchedule(WorkManager.getInstance(context))
     val notices = SyncNotices(syncs, NotificationBoard(context))
     val syncer: Syncer = WorkSyncer(context, repos, records, running, schedule, scope)
+
+    init {
+        // A card asking to sign in again would otherwise keep asking until its next sync
+        scope.launch { signIn.granted.collect { syncer.syncRefused(signIn::reaches) } }
+    }
+
     val locks = RepoLocks()
     val outgoing = Outgoing(repos, { synchronized(locks.of(it.id)) { PendingChanges(git).of(repo(it)) } }, scope)
 

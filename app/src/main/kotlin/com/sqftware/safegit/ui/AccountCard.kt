@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Button
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedCard
 import androidx.compose.material3.Text
@@ -39,7 +40,10 @@ fun AccountCard(
                     Text(stringResource(R.string.account_signed_out))
                     Button(onClick = onSignIn) { Text(stringResource(R.string.account_sign_in)) }
                 }
-                SignIn.State.Starting -> Text(stringResource(R.string.account_starting))
+                SignIn.State.Starting -> {
+                    Text(stringResource(R.string.account_starting))
+                    LinearProgressIndicator(Modifier.fillMaxWidth())
+                }
                 is SignIn.State.Waiting -> {
                     Text(stringResource(R.string.account_enter_code))
                     Text(state.code.userCode, style = MaterialTheme.typography.headlineMedium, fontFamily = FontFamily.Monospace)
@@ -48,6 +52,9 @@ fun AccountCard(
                         Button(onClick = { onOpen(state.code) }) { Text(stringResource(R.string.account_open)) }
                         TextButton(onClick = onCancel) { Text(stringResource(R.string.cancel)) }
                     }
+                    // GitHub is asked every few seconds whether the code was entered, so a sign-in shows only after a wait
+                    Text(stringResource(R.string.account_checking), style = MaterialTheme.typography.bodySmall)
+                    LinearProgressIndicator(Modifier.fillMaxWidth())
                 }
                 is SignIn.State.SignedIn -> Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(stringResource(R.string.account_signed_in, "@${state.account.login}"), Modifier.weight(1f))
