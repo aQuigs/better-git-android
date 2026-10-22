@@ -1,7 +1,7 @@
 package com.sqftware.safegit.ui
 
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.requiredSize
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
@@ -21,8 +21,9 @@ class ListDetailTest {
 
     private val empty = "History, files and conflicts open here."
 
+    // Required, as the test device's own screen may be narrower than the window the test plays
     private fun show(width: Dp, height: Dp = 800.dp, detail: (@Composable () -> Unit)?) = compose.setContent {
-        Box(Modifier.size(width, height)) { ListDetail(list = { Text("repos") }, detail) }
+        Box(Modifier.requiredSize(width, height)) { ListDetail(list = { Text("repos") }, detail) }
     }
 
     @Test
