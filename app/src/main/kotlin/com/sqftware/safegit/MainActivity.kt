@@ -31,7 +31,6 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.saveable.listSaver
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
@@ -104,48 +103,6 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-/** What opens from the repo list: beside it on a wide window, in its place on a phone. */
-private sealed interface Detail {
-    data object Add : Detail
-    data object About : Detail
-    data class History(val repo: String) : Detail
-    data class Files(val repo: String) : Detail
-    /** The repo's id and the path of the marked file open */
-    data class Resolve(val repo: String, val path: String) : Detail
-
-    companion object {
-        val saver = listSaver<Detail?, String>(
-            save = {
-                when (it) {
-                    null -> emptyList()
-                    Add -> listOf("add")
-                    About -> listOf("about")
-                    is History -> listOf("history", it.repo)
-                    is Files -> listOf("files", it.repo)
-                    is Resolve -> listOf("resolve", it.repo, it.path)
-                }
-            },
-            restore = {
-                when (it.firstOrNull()) {
-                    "add" -> Add
-                    "about" -> About
-                    "history" -> History(it[1])
-                    "files" -> Files(it[1])
-                    "resolve" -> Resolve(it[1], it[2])
-                    else -> null
-                }
-            },
-        )
-    }
-}
-
-private val Detail?.repo get() = when (this) {
-    is Detail.History -> repo
-    is Detail.Files -> repo
-    is Detail.Resolve -> repo
-    else -> null
-}
-
 @Composable
 private fun App(services: Services) {
     var detail by rememberSaveable(stateSaver = Detail.saver) { mutableStateOf(null) }
@@ -159,12 +116,11 @@ private fun App(services: Services) {
         }
     }
 
-    val close = { detail = null }
     ListDetail(
         list = {
             Repos(
                 services,
-                open = detail.repo,
+                selected = detail?.repo,
                 onAdd = { detail = Detail.Add },
                 onAbout = { detail = Detail.About },
                 onHistory = { detail = Detail.History(it.id) },
@@ -172,11 +128,8 @@ private fun App(services: Services) {
                 onResolve = { repo, path -> detail = Detail.Resolve(repo.id, path) },
             )
         },
-        detail = when (val shown = detail) {
-            null -> null
-            // Keyed, so a screen opened for another repo or file starts afresh rather than with what this one remembered
-            else -> { { key(shown) { DetailScreen(services, shown, connecting, close) } } }
-        },
+        // Keyed, so a screen opened for another repo or file starts afresh rather than with what this one remembered
+        detail = detail?.let { shown -> { key(shown) { DetailScreen(services, shown, connecting, onDone = { detail = null }) } } },
     )
 }
 
@@ -325,7 +278,7 @@ private fun Resolve(services: Services, id: String, path: String, onDone: () -> 
 @Composable
 private fun Repos(
     services: Services,
-    open: String?,
+    selected: String?,
     onAdd: () -> Unit,
     onAbout: () -> Unit,
     onHistory: (SavedRepo) -> Unit,
@@ -363,7 +316,7 @@ private fun Repos(
         onCloseAll = services.syncer::closeAll,
         preview = services::preview,
         onResolve = onResolve,
-        selected = open,
+        selected = selected,
         header = {
             AccountCard(
                 account,

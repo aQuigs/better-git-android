@@ -143,7 +143,7 @@ private fun RepoCard(
     selected: Boolean,
 ) {
     Card(
-        Modifier.fillMaxWidth().padding(bottom = 12.dp).semantics { this.selected = selected },
+        Modifier.fillMaxWidth().padding(bottom = 12.dp).semantics { if (selected) this.selected = true },
         border = if (selected) BorderStroke(2.dp, MaterialTheme.colorScheme.primary) else null,
     ) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {

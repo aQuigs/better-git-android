@@ -21,6 +21,9 @@ import com.sqftware.safegit.R
 /** Material's medium width class, which an unfolded foldable reaches in either orientation */
 private val TWO_PANES = 600.dp
 
+/** Material's medium height class, which leaves out a phone on its side, too short to read two panes on */
+private val TWO_PANES_HEIGHT = 480.dp
+
 /**
  * [list] beside [detail] on a wide window, such as a tablet's or an unfolded foldable's; on a narrow one, [detail]
  * when there is one, in place of [list].
@@ -28,7 +31,7 @@ private val TWO_PANES = 600.dp
 @Composable
 fun ListDetail(list: @Composable () -> Unit, detail: (@Composable () -> Unit)?) {
     BoxWithConstraints(Modifier.fillMaxSize()) {
-        val wide = maxWidth >= TWO_PANES
+        val wide = maxWidth >= TWO_PANES && maxHeight >= TWO_PANES_HEIGHT
         val listWidth = (maxWidth * 0.4f).coerceIn(320.dp, 480.dp)
         // Each pane sits at the same place in the composition in either layout, so what it saved, such as a search or
         // where a list was scrolled, comes back when a fold or unfold recreates the activity

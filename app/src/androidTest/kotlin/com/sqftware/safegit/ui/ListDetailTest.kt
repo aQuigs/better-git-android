@@ -1,7 +1,7 @@
 package com.sqftware.safegit.ui
 
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.size
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
@@ -21,8 +21,16 @@ class ListDetailTest {
 
     private val empty = "History, files and conflicts open here."
 
-    private fun show(width: Dp, detail: (@Composable () -> Unit)?) = compose.setContent {
-        Box(Modifier.width(width)) { ListDetail(list = { Text("repos") }, detail) }
+    private fun show(width: Dp, height: Dp = 800.dp, detail: (@Composable () -> Unit)?) = compose.setContent {
+        Box(Modifier.size(width, height)) { ListDetail(list = { Text("repos") }, detail) }
+    }
+
+    @Test
+    fun showsOnePaneOnAPhoneOnItsSide() {
+        show(900.dp, height = 400.dp) { Text("history") }
+
+        compose.onNodeWithText("repos").assertDoesNotExist()
+        compose.onNodeWithText("history").assertExists()
     }
 
     @Test
@@ -35,7 +43,7 @@ class ListDetailTest {
 
     @Test
     fun saysWhatOpensBesideTheListBeforeAnythingIsOpen() {
-        show(900.dp, null)
+        show(900.dp, detail = null)
 
         compose.onNodeWithText("repos").assertExists()
         compose.onNodeWithText(empty).assertExists()
@@ -51,7 +59,7 @@ class ListDetailTest {
 
     @Test
     fun showsOnlyTheListOnANarrowWindowWithNothingOpen() {
-        show(400.dp, null)
+        show(400.dp, detail = null)
 
         compose.onNodeWithText("repos").assertExists()
         compose.onNodeWithText(empty).assertDoesNotExist()
