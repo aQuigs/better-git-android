@@ -18,7 +18,7 @@
 ## Architecture and tests
 
 - Logic that does not need Android lives in plain Kotlin with no `android.*` imports, so it is unit tested on the JVM. Android system and storage access sits behind interfaces, so UI and logic can be tested with fakes.
-- UI behaviour gets a Compose test in `androidTest` that renders the composable with fake data; keep end-to-end tests against the real system few.
+- UI behavior gets a Compose test in `androidTest` that renders the composable with fake data; keep end-to-end tests against the real system few.
 - Kotlin official code style, 4-space indent (`.editorconfig`). Terse over verbose.
 
 ## CI and release
