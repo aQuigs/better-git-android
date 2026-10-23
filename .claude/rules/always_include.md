@@ -19,7 +19,7 @@
   - Output: only runs that show what the change does.
 - A passing test is not a passing feature: for UI changes, run the app, screenshot, and look at the image before calling it done.
 - User-visible changes carry screenshots (or a recording) in the PR's "Screenshots / recording" section:
-  - Shoot every state the change touches, not one before and one after. Empty and filled, and before and after an action, are separate states. Light and dark theme are separate states only when the change is about colour or theming; otherwise one theme is enough.
+  - Shoot every state the change touches, not one before and one after. Empty and filled, and before and after an action, are separate states. Light and dark theme are separate states only when the change is about color or theming; otherwise one theme is enough.
   - Take the before shots on `main` and the after shots on the branch.
   - Publish with `scripts/pr-media.sh`, one caption per file, and paste its table as is, at most about four states. A screen that is new in the PR gets an after shot only.
   - Media is uploaded as GitHub attachments, never committed. Shots must never show a signed-in account.
